@@ -5,7 +5,9 @@ __pycache__/
 
 # Local biometric data and credentials
 backend/enrollment_images/*
+!backend/enrollment_images/.gitkeep
 backend/fingerprint_enrollment_images/*
+!backend/fingerprint_enrollment_images/.gitkeep
 backend/face_templates/*
 backend/fingerprint_templates/*
 backend/webauthn_credentials.json
