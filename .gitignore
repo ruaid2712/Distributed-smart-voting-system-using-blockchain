@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.pyc
+__pycache__/
+
+# Local biometric data and credentials
+backend/enrollment_images/*
+backend/fingerprint_enrollment_images/*
+backend/face_templates/*
+backend/fingerprint_templates/*
+backend/webauthn_credentials.json
+
+# Local environment files
+.venv/
+.env
+.env.*
+!.env.example
