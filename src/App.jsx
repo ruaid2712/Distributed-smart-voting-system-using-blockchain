@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Login from './pages/Login';
+import Registration from './pages/Registration';
 import AdminLogin from './pages/AdminLogin';
 import VotingDashboard from './pages/VotingDashboard';
 import AdminDashboard from './pages/AdminDashboard';
@@ -18,6 +19,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home isAuthenticated={isAuthenticated} />} />
           <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
+          <Route path="/register" element={<Registration />} />
           <Route path="/admin-login" element={<AdminLogin setIsAdmin={setIsAdmin} />} />
           <Route path="/vote" element={<VotingDashboard isAuthenticated={isAuthenticated} />} />
           <Route path="/admin" element={<AdminDashboard isAdmin={isAdmin} />} />

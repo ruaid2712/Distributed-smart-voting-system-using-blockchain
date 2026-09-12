@@ -1,27 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 const FACE_API_URL = import.meta.env.VITE_FACE_API_URL || 'http://127.0.0.1:8000';
+const SECUGEN_API_URL = 'https://localhost:8443/SGIFPCapture';
+const SECUGEN_LICENSE = import.meta.env.VITE_SECUGEN_LICENSE || '';
 
-const base64urlToBuffer = (value) => {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = window.atob(normalized + '='.repeat((4 - normalized.length % 4) % 4));
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-};
-
-const credentialToJson = (credential) => {
-  if (typeof credential.toJSON === 'function') return credential.toJSON();
-  return {
-    id: credential.id,
-    rawId: btoa(String.fromCharCode(...new Uint8Array(credential.rawId))),
-    type: credential.type,
-    response: {
-      clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(credential.response.clientDataJSON))),
-      attestationObject: btoa(String.fromCharCode(...new Uint8Array(credential.response.attestationObject))),
-      authenticatorData: btoa(String.fromCharCode(...new Uint8Array(credential.response.authenticatorData))),
-      signature: btoa(String.fromCharCode(...new Uint8Array(credential.response.signature))),
-      userHandle: credential.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(credential.response.userHandle))) : null,
-    },
-  };
+const base64ToBlob = (value, type) => {
+  const binary = window.atob(value);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new Blob([bytes], { type });
 };
 
 const BiometricScanner = ({ voterId, onSuccess }) => {
@@ -80,42 +66,48 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
 
   const startFingerprintScan = async () => {
     setScanState('scanning');
-    setMessage('Waiting for Windows Hello fingerprint...');
+    setMessage('Place your finger on the SecuGen reader...');
     try {
-      if (!window.PublicKeyCredential || !navigator.credentials) throw new Error('Windows Hello is not available in this browser.');
-      const statusResponse = await fetch(`${FACE_API_URL}/api/webauthn/status?voter_id=${encodeURIComponent(voterId)}`);
+      const captureResponse = await fetch(SECUGEN_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ Timeout: '10000', Quality: '50', licstr: SECUGEN_LICENSE, templateFormat: 'ISO', imageWSQRate: '0.75' }),
+      });
+      if (!captureResponse.ok) throw new Error(`SecuGen service returned HTTP ${captureResponse.status}.`);
+      const capture = await captureResponse.json();
+      if (capture.ErrorCode !== 0) {
+        const detail = capture.ErrorCode >= 10000 ? 'Check the SecuGen license configuration.' : 'Check that the reader is connected.';
+        throw new Error(`SecuGen capture failed (error ${capture.ErrorCode}). ${detail}`);
+      }
+      if (!capture.BMPBase64) throw new Error('SecuGen returned no fingerprint image.');
+
+      const fingerprintImage = base64ToBlob(capture.BMPBase64, 'image/bmp');
+      const statusResponse = await fetch(`${FACE_API_URL}/api/fingerprint/status?voter_id=${encodeURIComponent(voterId)}`);
       const status = await statusResponse.json();
       if (!statusResponse.ok) throw new Error(status.detail || 'Unable to check fingerprint enrollment.');
 
       if (!status.enrolled) {
-        const optionsResponse = await fetch(`${FACE_API_URL}/api/webauthn/register/options?voter_id=${encodeURIComponent(voterId)}`, { method: 'POST' });
-        const options = await optionsResponse.json();
-        if (!optionsResponse.ok) throw new Error(options.detail || 'Unable to start fingerprint enrollment.');
-        options.challenge = base64urlToBuffer(options.challenge);
-        options.user.id = base64urlToBuffer(options.user.id);
-        const credential = await navigator.credentials.create({ publicKey: options });
-        const registrationResponse = await fetch(`${FACE_API_URL}/api/webauthn/register/verify?voter_id=${encodeURIComponent(voterId)}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentialToJson(credential)),
+        const formData = new FormData();
+        formData.append('file', fingerprintImage, 'fingerprint.bmp');
+        const enrollmentResponse = await fetch(`${FACE_API_URL}/api/fingerprint/enroll/${encodeURIComponent(voterId)}`, {
+          method: 'POST', body: formData,
         });
-        const result = await registrationResponse.json();
-        if (!registrationResponse.ok) throw new Error(result.detail || 'Fingerprint enrollment failed.');
+        const result = await enrollmentResponse.json();
+        if (!enrollmentResponse.ok) throw new Error(result.detail || 'Fingerprint enrollment failed.');
         setScanState('success');
-        setMessage('Fingerprint enrolled and verified with Windows Hello.');
+        setMessage('SecuGen fingerprint enrolled and verified.');
         setTimeout(() => { setPhase('completed'); onSuccess(); }, 1200);
         return;
       }
 
-      const optionsResponse = await fetch(`${FACE_API_URL}/api/webauthn/authenticate/options?voter_id=${encodeURIComponent(voterId)}`, { method: 'POST' });
-      const options = await optionsResponse.json();
-      if (!optionsResponse.ok) throw new Error(options.detail || 'Unable to start fingerprint verification.');
-      options.challenge = base64urlToBuffer(options.challenge);
-      options.allowCredentials = options.allowCredentials?.map((item) => ({ ...item, id: base64urlToBuffer(item.id) }));
-      const credential = await navigator.credentials.get({ publicKey: options });
-      const verificationResponse = await fetch(`${FACE_API_URL}/api/webauthn/authenticate/verify?voter_id=${encodeURIComponent(voterId)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentialToJson(credential)),
+      const formData = new FormData();
+      formData.append('file', fingerprintImage, 'fingerprint.bmp');
+      const verificationResponse = await fetch(`${FACE_API_URL}/api/fingerprint/verify?voter_id=${encodeURIComponent(voterId)}`, {
+        method: 'POST', body: formData,
       });
       const result = await verificationResponse.json();
       if (!verificationResponse.ok) throw new Error(result.detail || 'Fingerprint verification failed.');
+      if (!result.verified) throw new Error(result.message || 'Fingerprint does not match the enrolled template.');
       setScanState('success');
       setMessage(result.message);
       setTimeout(() => { setPhase('completed'); onSuccess(); }, 1200);

@@ -150,6 +150,14 @@ def fingerprint_template_path_for(voter_id: str) -> Path:
     return FINGERPRINT_TEMPLATES_DIR / f"{normalized_id}.npz"
 
 
+def generate_voter_id() -> str:
+    for _ in range(100):
+        voter_id = f"VTR-{secrets.randbelow(100000):05d}"
+        if not template_path_for(voter_id).exists() and not fingerprint_template_path_for(voter_id).exists():
+            return voter_id
+    raise HTTPException(status_code=503, detail="Unable to generate a unique voter ID. Try again.")
+
+
 def extract_fingerprint_descriptors(image: np.ndarray) -> np.ndarray:
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(grayscale)
@@ -234,6 +242,26 @@ async def enroll_face(voter_id: str, file: UploadFile = File(...)) -> dict[str, 
     return {"enrolled": True, "voterId": voter_id.strip()}
 
 
+@app.post("/api/voters/register")
+async def register_voter(face_file: UploadFile = File(...), fingerprint_file: UploadFile = File(...)) -> dict[str, Any]:
+    if not face_file.content_type or not face_file.content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Upload a face image.")
+    if not fingerprint_file.content_type or not fingerprint_file.content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Upload a fingerprint image.")
+
+    voter_id = generate_voter_id()
+    face_image = decode_image(await face_file.read())
+    fingerprint_image = decode_image(await fingerprint_file.read())
+    face_feature = extract_face_feature(face_image)
+    fingerprint_descriptors = extract_fingerprint_descriptors(fingerprint_image)
+
+    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    FINGERPRINT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    np.save(template_path_for(voter_id), face_feature)
+    np.savez_compressed(fingerprint_template_path_for(voter_id), descriptors=fingerprint_descriptors)
+    return {"registered": True, "voterId": voter_id}
+
+
 @app.post("/api/fingerprint/enroll/{voter_id}")
 async def enroll_fingerprint(voter_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
     template_path = fingerprint_template_path_for(voter_id)
@@ -245,6 +273,11 @@ async def enroll_fingerprint(voter_id: str, file: UploadFile = File(...)) -> dic
     FINGERPRINT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(template_path, descriptors=descriptors)
     return {"enrolled": True, "voterId": voter_id.strip(), "featureCount": len(descriptors)}
+
+
+@app.get("/api/fingerprint/status")
+def fingerprint_status(voter_id: str) -> dict[str, bool]:
+    return {"enrolled": fingerprint_template_path_for(voter_id).exists()}
 
 
 @app.post("/api/fingerprint/verify")

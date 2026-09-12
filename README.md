@@ -52,16 +52,33 @@ curl.exe -X POST -F "file=@C:\path\to\voter-face.jpg" http://localhost:8000/api/
 The login screen then captures a webcam frame and compares it with that stored
 template. Templates are stored as face embeddings rather than source images.
 
+## SecuGen Fingerprint Reader
+
+The fingerprint step uses the installed SecuGen WebAPI service at
+`https://localhost:8443/SGIFPCapture`. Create a `.env.local` file in the
+project root and add the license supplied by SecuGen:
+
+```text
+VITE_SECUGEN_LICENSE=your-secu-gen-license
+```
+
+Restart Vite after changing `.env.local`. The first successful scan for a
+voter ID enrolls a fingerprint template; later scans compare against it.
+
 ## Fingerprint Service
 
-After face verification, the fingerprint step uses WebAuthn and Windows Hello.
-The browser opens the laptop's fingerprint prompt, and the backend verifies the
-signed credential. Raw fingerprint data is never exposed to the application.
+After face verification, the fingerprint step uses the installed SecuGen
+WebAPI service. The browser sends the captured fingerprint image to the
+backend, which compares it with the enrolled fingerprint descriptors. Raw
+fingerprint images are not stored by the application.
 
-The first use for a voter ID registers the laptop fingerprint as that voter's
-Windows Hello credential. Later logins verify that credential. Use `localhost`
-for the frontend URL because WebAuthn requires a secure context; localhost is
-trusted for local development.
+## Registering a New Voter
+
+Start the frontend and backend, then open `http://localhost:5173/register`.
+Capture the voter's face followed by a fingerprint scan. The backend stores
+the face embedding in `backend/face_templates/` and the fingerprint descriptors
+in `backend/fingerprint_templates/`, then displays a generated ID such as
+`VTR-88942`.
 
 ## Transitioning to a Production Backend
 

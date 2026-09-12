@@ -36,6 +36,7 @@ const Navbar = ({ isAuthenticated, setIsAuthenticated, isAdmin, setIsAdmin }) =>
             ) : (
               <>
                 <li className="nav-item me-2"><Link className="btn btn-outline-info rounded-pill px-4 btn-sm" to="/admin-login">Admin Portal</Link></li>
+                <li className="nav-item me-2"><Link className="btn btn-outline-light rounded-pill px-4 btn-sm" to="/register">Register Voter</Link></li>
                 <li className="nav-item mt-2 mt-lg-0"><Link className="btn btn-primary-custom rounded-pill px-4" to="/login">Voter Login</Link></li>
               </>
             )}
