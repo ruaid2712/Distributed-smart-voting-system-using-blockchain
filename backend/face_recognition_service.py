@@ -184,6 +184,13 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "face-recognition"}
 
 
+@app.get("/api/voters/count")
+def voter_count() -> dict[str, int]:
+    face_voter_ids = {path.stem for path in TEMPLATES_DIR.glob("*.npy")}
+    fingerprint_voter_ids = {path.stem for path in FINGERPRINT_TEMPLATES_DIR.glob("*.npz")}
+    return {"count": len(face_voter_ids & fingerprint_voter_ids)}
+
+
 @app.post("/api/face/detect")
 async def detect_face(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.content_type or not file.content_type.startswith("image/"):

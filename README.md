@@ -1,85 +1,162 @@
-# BioVoteChain - Frontend Application
+# BioVoteChain
 
-BioVoteChain is a blockchain-based electronic voting system utilizing biometric authentication to demonstrate transparent and immutable elections.
+BioVoteChain is a React voting application that combines biometric voter verification with an Ethereum-compatible voting smart contract. The local development stack uses FastAPI, Ganache, Truffle, MetaMask, and Vite.
 
 ## Technology Stack
 
-- **Frontend Framework**: React 18
-- **Build Tool**: Vite
-- **Routing**: React Router DOM v6
-- **Styling**: Bootstrap 5 (CSS only) and Custom CSS
-- **Icons**: Bootstrap Icons
+- React 18, Vite, and React Router
+- Bootstrap 5 and Bootstrap Icons
+- FastAPI, OpenCV, NumPy, WebAuthn, and SecuGen WebAPI
+- Solidity 0.8.20 voting contract
+- Truffle for compilation and migrations
+- Ganache for the local Ethereum network
+- ethers.js and MetaMask for wallet transactions
 
-## Installation & Local Development
+## Prerequisites
 
-1. Ensure [Node.js](https://nodejs.org/) is installed.
-2. Install dependencies:
+Install the following before starting:
 
-   ```bash
-   npm install
-   ```
+- Node.js 18 or newer
+- Python 3.10 or newer
+- Ganache Desktop or Ganache CLI
+- MetaMask browser extension
+- A working camera
+- SecuGen WebAPI and fingerprint reader for biometric registration/login
 
-3. Start the development server:
+## Install Dependencies
 
-   ```bash
-   npm run dev
-   ```
+From the project root:
 
-## Face Service
+```powershell
+npm install
 
-The first backend slice is a FastAPI service that validates whether an uploaded
-capture contains exactly one detectable face. It does not perform voter identity
-matching yet.
-
-```bash
 py -m venv .venv
 .venv\Scripts\activate
 py -m pip install -r backend\requirements.txt
+```
+
+Copy the example environment file to `.env` and update the contract address after deployment:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Never commit `.env`, private keys, biometric templates, or credential files.
+
+## Start Ganache
+
+Start Ganache Desktop with:
+
+- RPC server: `http://127.0.0.1:7545`
+- Network ID / chain ID: `1337` (Ganache may display network ID `5777` depending on its configuration)
+- At least one funded account
+
+Import a Ganache account into MetaMask using its private key. Use only local demo accounts. Never use a real wallet private key in this project.
+
+## Compile and Deploy the Contract
+
+The Truffle configuration is in `truffle-config.js`. Compile and deploy to Ganache:
+
+```powershell
+npx truffle compile
+npx truffle migrate --network development --reset
+```
+
+Copy the deployed `Voting` contract address from the migration output into `.env`:
+
+```text
+VITE_VOTING_CONTRACT_ADDRESS=0xYourDeployedVotingContractAddress
+VITE_NETWORK_NAME=ganache
+VITE_GANACHE_RPC_URL=http://127.0.0.1:7545
+VITE_FACE_API_URL=http://127.0.0.1:8000
+```
+
+Restart Vite after changing `.env`. The migration creates these initial candidates:
+
+- Dr. Alan Turing
+- Ada Lovelace
+- Grace Hopper
+
+Each wallet can cast one vote because the contract tracks `hasVoted[msg.sender]`. To test another vote, use another funded Ganache account in MetaMask. A full Ganache reset also creates a new contract address, so update `.env` and redeploy whenever the chain is reset.
+
+## Start the Biometric Backend
+
+From the project root:
+
+```powershell
+.venv\Scripts\activate
 py -m uvicorn backend.face_recognition_service:app --reload --port 8000
 ```
 
-The service exposes `GET /health` and `POST /api/face/verify` on
-`http://localhost:8000`. Interactive API documentation is available at
-`http://localhost:8000/docs`.
-
-Before verification, enroll a stored face template for the voter ID. Use a
-clear image containing exactly one face:
+The API is available at `http://127.0.0.1:8000`. Check it with:
 
 ```powershell
-curl.exe -X POST -F "file=@C:\path\to\voter-face.jpg" http://localhost:8000/api/face/enroll/VTR-88492
+curl.exe http://127.0.0.1:8000/health
+curl.exe http://127.0.0.1:8000/api/voters/count
 ```
 
-The login screen then captures a webcam frame and compares it with that stored
-template. Templates are stored as face embeddings rather than source images.
+The backend stores face embeddings in `backend/face_templates/` and fingerprint descriptors in `backend/fingerprint_templates/`. Raw biometric images are not stored by the application.
 
-## SecuGen Fingerprint Reader
+## SecuGen Configuration
 
-The fingerprint step uses the installed SecuGen WebAPI service at
-`https://localhost:8443/SGIFPCapture`. Create a `.env.local` file in the
-project root and add the license supplied by SecuGen:
+The registration flow uses the SecuGen WebAPI endpoint at `https://localhost:8443/SGIFPCapture`. Add the license supplied by SecuGen to `.env`:
 
 ```text
 VITE_SECUGEN_LICENSE=your-secu-gen-license
 ```
 
-Restart Vite after changing `.env.local`. The first successful scan for a
-voter ID enrolls a fingerprint template; later scans compare against it.
+The reader service must be running before fingerprint capture. Camera access must also be allowed by the browser.
 
-## Fingerprint Service
+## Start the Frontend
 
-After face verification, the fingerprint step uses the installed SecuGen
-WebAPI service. The browser sends the captured fingerprint image to the
-backend, which compares it with the enrolled fingerprint descriptors. Raw
-fingerprint images are not stored by the application.
+Run the frontend from the project root:
 
-## Registering a New Voter
+```powershell
+npm run dev
+```
 
-Start the frontend and backend, then open `http://localhost:5173/register`.
-Capture the voter's face followed by a fingerprint scan. The backend stores
-the face embedding in `backend/face_templates/` and the fingerprint descriptors
-in `backend/fingerprint_templates/`, then displays a generated ID such as
-`VTR-88942`.
+Open `http://localhost:5173`.
 
-## Transitioning to a Production Backend
+### Voter flow
 
-The application currently simulates biometric verification, database logic, and blockchain consensus using React state and `setTimeout`. Replace those simulations with a biometric service, a backend session/API layer, a Web3 provider or Hyperledger SDK, and live API data when integrating a production backend.
+1. Open **Register Voter** and capture the face and fingerprint.
+2. Use the generated voter ID at **Voter Login**.
+3. Complete face and fingerprint verification.
+4. Connect MetaMask to Ganache and select a funded account.
+5. Select a candidate and confirm the blockchain transaction.
+
+### Admin flow
+
+1. Open **Admin Portal**.
+2. Use the current demo credentials: `admin` / `admin`.
+3. The admin panel reads total votes and candidate progress from the deployed contract.
+4. The registered-voter total is read from the biometric backend.
+
+## Useful Commands
+
+```powershell
+npm run build
+npm run truffle:compile
+npm run truffle:migrate
+npm run truffle:test
+```
+
+The legacy Hardhat scripts remain in the repository for reference, but Truffle is the active deployment workflow.
+
+## Troubleshooting
+
+### `missing revert data` during vote submission
+
+The selected MetaMask wallet has probably already voted. Each wallet can vote once. Switch to another funded Ganache account or reset Ganache and redeploy the contract.
+
+### Contract address or code not found
+
+Ganache may have been restarted or reset. Run the Truffle migration again and update `VITE_VOTING_CONTRACT_ADDRESS` in `.env`.
+
+### Registered voters show a loading state
+
+Start the FastAPI backend and confirm `http://127.0.0.1:8000/api/voters/count` returns JSON. The count includes voters with both face and fingerprint templates.
+
+### MetaMask transaction uses the wrong network
+
+Select the Ganache network with RPC `http://127.0.0.1:7545` and chain ID `1337`, then reload the application.

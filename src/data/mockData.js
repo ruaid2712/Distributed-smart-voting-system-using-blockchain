@@ -1,3 +1,5 @@
+import { voteLedger } from './blockchain.js';
+
 export let candidatesData = [
   { id: "cand_001", name: "Dr. Alan Turing", party: "Techno-Progressive Party", manifesto: "Advancing computational rights, securing digital privacy, and ensuring unbreakable cryptographic integrity for all citizen data.", votes: 2150, icon: "bi-cpu" },
   { id: "cand_002", name: "Ada Lovelace", party: "Analytical Engine Coalition", manifesto: "Pioneering analytical frameworks, advocating for algorithmic transparency, and funding next-generation technological education.", votes: 3820, icon: "bi-braces-asterisk" },
@@ -24,10 +26,34 @@ export const removeCandidate = (candidateId) => {
   }
 };
 
-export const recordVote = (candidateId) => {
-  const candidate = candidatesData.find((item) => item.id === candidateId);
-  if (candidate) {
-    candidate.votes += 1;
-    analyticsData.votesCast += 1;
+export const recordVote = (candidateId, voterId) => {
+  const normalizedVoterId = String(voterId || '').trim();
+  if (!normalizedVoterId) {
+    throw new Error('A voter identity is required before casting a vote.');
   }
+
+  const candidate = candidatesData.find((item) => item.id === candidateId);
+  if (!candidate) {
+    throw new Error('Selected candidate could not be found.');
+  }
+
+  voteLedger.addVoteTransaction(normalizedVoterId, candidateId);
+  const block = voteLedger.minePendingTransactions('BioVoteChain-Node-01');
+  const transaction = block.transactions.at(-1);
+
+  if (!transaction) {
+    throw new Error('The vote was not added to the blockchain.');
+  }
+
+  candidate.votes += 1;
+  analyticsData.votesCast += 1;
+  analyticsData.lastBlockMined = `Block #${block.index} mined`;
+
+  return {
+    txHash: block.hash,
+    blockIndex: block.index,
+    transaction,
+    miner: block.miner,
+    valid: voteLedger.isValid(),
+  };
 };

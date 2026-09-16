@@ -1,13 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 
-const Home = ({ isAuthenticated }) => (
+const Home = ({ isAuthenticated, isAdmin }) => (
   <>
     <section className="hero-section text-center">
       <div className="container">
         <h1 className="display-4 fw-bold mb-4">The Future of Secure Democracy</h1>
         <p className="lead mb-5 mx-auto" style={{ maxWidth: '700px' }}>BioVoteChain combines state-of-the-art biometric authentication with decentralized blockchain infrastructure to guarantee immutable, transparent, and coercion-free elections.</p>
-        <Link to={isAuthenticated ? '/vote' : '/login'} className="btn btn-lg btn-info text-dark fw-bold px-5 py-3 rounded-pill shadow">Access Voting Terminal <i className="bi bi-arrow-right ms-2"></i></Link>
+        {!isAdmin && <Link to={isAuthenticated ? '/vote' : '/login'} className="btn btn-lg btn-info text-dark fw-bold px-5 py-3 rounded-pill shadow">Access Voting Terminal <i className="bi bi-arrow-right ms-2"></i></Link>}
       </div>
     </section>
     <section className="py-5 container">

@@ -11,17 +11,18 @@ import AdminDashboard from './pages/AdminDashboard';
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [voterId, setVoterId] = useState('');
 
   return (
     <div className="d-flex flex-column min-vh-100">
       <Navbar isAuthenticated={isAuthenticated} setIsAuthenticated={setIsAuthenticated} isAdmin={isAdmin} setIsAdmin={setIsAdmin} />
       <main className="flex-grow-1 bg-light-custom">
         <Routes>
-          <Route path="/" element={<Home isAuthenticated={isAuthenticated} />} />
-          <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
+          <Route path="/" element={<Home isAuthenticated={isAuthenticated} isAdmin={isAdmin} />} />
+          <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} setVoterId={setVoterId} />} />
           <Route path="/register" element={<Registration />} />
           <Route path="/admin-login" element={<AdminLogin setIsAdmin={setIsAdmin} />} />
-          <Route path="/vote" element={<VotingDashboard isAuthenticated={isAuthenticated} />} />
+          <Route path="/vote" element={<VotingDashboard isAuthenticated={isAuthenticated} voterId={voterId} />} />
           <Route path="/admin" element={<AdminDashboard isAdmin={isAdmin} />} />
         </Routes>
       </main>
