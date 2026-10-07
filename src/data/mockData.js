@@ -1,9 +1,9 @@
 import { voteLedger } from './blockchain.js';
 
 export let candidatesData = [
-  { id: "cand_001", name: "Dr. Alan Turing", party: "Techno-Progressive Party", manifesto: "Advancing computational rights, securing digital privacy, and ensuring unbreakable cryptographic integrity for all citizen data.", votes: 2150, icon: "bi-cpu" },
-  { id: "cand_002", name: "Ada Lovelace", party: "Analytical Engine Coalition", manifesto: "Pioneering analytical frameworks, advocating for algorithmic transparency, and funding next-generation technological education.", votes: 3820, icon: "bi-braces-asterisk" },
-  { id: "cand_003", name: "Grace Hopper", party: "Compiler Consortium", manifesto: "Debugging the bureaucratic machine. Promising less red tape and highly optimized governmental processes for the modern era.", votes: 1805, icon: "bi-bug" }
+  { id: "cand_001", chainId: 0, name: "Dr. Alan Turing", party: "Techno-Progressive Party", manifesto: "Advancing computational rights, securing digital privacy, and ensuring unbreakable cryptographic integrity for all citizen data.", votes: 2150, icon: "bi-cpu" },
+  { id: "cand_002", chainId: 1, name: "Ada Lovelace", party: "Analytical Engine Coalition", manifesto: "Pioneering analytical frameworks, advocating for algorithmic transparency, and funding next-generation technological education.", votes: 3820, icon: "bi-braces-asterisk" },
+  { id: "cand_003", chainId: 2, name: "Grace Hopper", party: "Compiler Consortium", manifesto: "Debugging the bureaucratic machine. Promising less red tape and highly optimized governmental processes for the modern era.", votes: 1805, icon: "bi-bug" }
 ];
 
 export const analyticsData = {
@@ -15,7 +15,7 @@ export const analyticsData = {
 };
 
 export const addCandidate = (newCandidate) => {
-  candidatesData.push(newCandidate);
+  candidatesData.push({ ...newCandidate, id: `cand_${Date.now()}`, chainId: null, votes: 0 });
 };
 
 export const removeCandidate = (candidateId) => {

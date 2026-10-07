@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import base64
+from functools import lru_cache
 import hashlib
 import json
+import logging
+import os
 from pathlib import Path
 import re
 import secrets
+import time
 from typing import Any
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -31,6 +38,7 @@ from webauthn.helpers.structs import (
 )
 
 app = FastAPI(title="BioVoteChain Face Service", version="0.1.0")
+logger = logging.getLogger("uvicorn.error")
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,10 +54,12 @@ app.add_middleware(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR.parent / ".env")
 MODEL_DIR = BASE_DIR / "models"
 TEMPLATES_DIR = BASE_DIR / "face_templates"
 FINGERPRINT_TEMPLATES_DIR = BASE_DIR / "fingerprint_templates"
 WEBAUTHN_STORE = BASE_DIR / "webauthn_credentials.json"
+VOTER_PROFILES_STORE = BASE_DIR / "voter_profiles.json"
 RP_ID = "localhost"
 RP_NAME = "BioVoteChain"
 WEBAUTHN_ORIGINS = [
@@ -61,6 +71,27 @@ WEBAUTHN_ORIGINS = [
 DETECTION_MODEL = MODEL_DIR / "face_detection_yunet_2023mar.onnx"
 RECOGNITION_MODEL = MODEL_DIR / "face_recognition_sface_2021dec.onnx"
 MATCH_THRESHOLD = 0.363
+ADMIN_SESSION_TTL_SECONDS = 8 * 60 * 60
+ADMIN_USERNAME = os.environ.get("BIOVOTE_ADMIN_USERNAME", "")
+ADMIN_PASSWORD = os.environ.get("BIOVOTE_ADMIN_PASSWORD", "")
+admin_sessions: dict[str, float] = {}
+admin_bearer = HTTPBearer(auto_error=False)
+
+
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(admin_bearer)) -> str:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Admin authentication is required.")
+
+    expires_at = admin_sessions.get(credentials.credentials)
+    if expires_at is None or expires_at <= time.time():
+        admin_sessions.pop(credentials.credentials, None)
+        raise HTTPException(status_code=401, detail="Admin session is invalid or expired.")
+    return credentials.credentials
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -76,6 +107,16 @@ def load_webauthn_credentials() -> dict[str, dict[str, Any]]:
 
 def save_webauthn_credentials(credentials: dict[str, dict[str, Any]]) -> None:
     WEBAUTHN_STORE.write_text(json.dumps(credentials, indent=2), encoding="utf-8")
+
+
+def load_voter_profiles() -> dict[str, dict[str, Any]]:
+    if not VOTER_PROFILES_STORE.exists():
+        return {}
+    return json.loads(VOTER_PROFILES_STORE.read_text(encoding="utf-8"))
+
+
+def save_voter_profiles(profiles: dict[str, dict[str, Any]]) -> None:
+    VOTER_PROFILES_STORE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
 
 
 def encode_bytes(value: bytes) -> str:
@@ -112,6 +153,7 @@ def detect_faces(image: np.ndarray) -> list[dict[str, int]]:
     ]
 
 
+@lru_cache(maxsize=1)
 def get_face_models() -> tuple[Any, Any]:
     if not DETECTION_MODEL.exists() or not RECOGNITION_MODEL.exists():
         raise HTTPException(
@@ -184,6 +226,30 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "face-recognition"}
 
 
+@app.post("/api/admin/login")
+def admin_login(credentials: AdminLoginRequest) -> dict[str, str | int]:
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        raise HTTPException(status_code=503, detail="Admin credentials are not configured on the server.")
+    username_matches = secrets.compare_digest(credentials.username.encode("utf-8"), ADMIN_USERNAME.encode("utf-8"))
+    password_matches = secrets.compare_digest(credentials.password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8"))
+    if not username_matches or not password_matches:
+        raise HTTPException(status_code=401, detail="Invalid admin username or password.")
+
+    now = time.time()
+    expired_sessions = [token for token, expires_at in admin_sessions.items() if expires_at <= now]
+    for token in expired_sessions:
+        admin_sessions.pop(token, None)
+    token = secrets.token_urlsafe(32)
+    admin_sessions[token] = now + ADMIN_SESSION_TTL_SECONDS
+    return {"token": token, "expiresIn": ADMIN_SESSION_TTL_SECONDS}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(token: str = Depends(require_admin)) -> dict[str, bool]:
+    admin_sessions.pop(token, None)
+    return {"loggedOut": True}
+
+
 @app.get("/api/voters/count")
 def voter_count() -> dict[str, int]:
     face_voter_ids = {path.stem for path in TEMPLATES_DIR.glob("*.npy")}
@@ -213,6 +279,8 @@ async def detect_face(file: UploadFile = File(...)) -> dict[str, Any]:
 
 @app.post("/api/face/verify")
 async def verify_face(voter_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    request_started = time.perf_counter()
+    logger.info("Face verification request received")
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Upload an image file.")
 
@@ -220,11 +288,23 @@ async def verify_face(voter_id: str, file: UploadFile = File(...)) -> dict[str, 
     if not template_path.exists():
         raise HTTPException(status_code=404, detail="No enrolled face exists for this voter ID.")
 
-    captured_image = decode_image(await file.read())
+    stage_started = time.perf_counter()
+    image_bytes = await file.read()
+    logger.info("Face verification upload read in %.3fs", time.perf_counter() - stage_started)
+
+    stage_started = time.perf_counter()
+    captured_image = decode_image(image_bytes)
+    logger.info("Face verification image decoded in %.3fs", time.perf_counter() - stage_started)
+
+    stage_started = time.perf_counter()
     captured_feature = extract_face_feature(captured_image)
+    logger.info("Face verification feature extracted in %.3fs", time.perf_counter() - stage_started)
+
     stored_feature = np.load(template_path)
+    stage_started = time.perf_counter()
     _, recognizer = get_face_models()
     score = float(recognizer.match(stored_feature, captured_feature, cv2.FaceRecognizerSF_FR_COSINE))
+    logger.info("Face comparison completed in %.3fs; total %.3fs", time.perf_counter() - stage_started, time.perf_counter() - request_started)
     verified = score >= MATCH_THRESHOLD
 
     return {
@@ -250,7 +330,22 @@ async def enroll_face(voter_id: str, file: UploadFile = File(...)) -> dict[str, 
 
 
 @app.post("/api/voters/register")
-async def register_voter(face_file: UploadFile = File(...), fingerprint_file: UploadFile = File(...)) -> dict[str, Any]:
+async def register_voter(
+    name: str = Form(...),
+    age: int = Form(...),
+    address: str = Form(...),
+    ward: str = Form(...),
+    face_file: UploadFile = File(...),
+    fingerprint_file: UploadFile = File(...),
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    name = name.strip()
+    address = address.strip()
+    ward = ward.strip()
+    if not name or not address or not ward:
+        raise HTTPException(status_code=422, detail="Name, address, and ward are required.")
+    if age < 18 or age > 120:
+        raise HTTPException(status_code=422, detail="Voter age must be between 18 and 120.")
     if not face_file.content_type or not face_file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Upload a face image.")
     if not fingerprint_file.content_type or not fingerprint_file.content_type.startswith("image/"):
@@ -266,7 +361,15 @@ async def register_voter(face_file: UploadFile = File(...), fingerprint_file: Up
     FINGERPRINT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     np.save(template_path_for(voter_id), face_feature)
     np.savez_compressed(fingerprint_template_path_for(voter_id), descriptors=fingerprint_descriptors)
-    return {"registered": True, "voterId": voter_id}
+    profiles = load_voter_profiles()
+    profiles[voter_id] = {
+        "name": name,
+        "age": age,
+        "address": address,
+        "ward": ward,
+    }
+    save_voter_profiles(profiles)
+    return {"registered": True, "voterId": voter_id, "name": name}
 
 
 @app.post("/api/fingerprint/enroll/{voter_id}")
@@ -279,7 +382,8 @@ async def enroll_fingerprint(voter_id: str, file: UploadFile = File(...)) -> dic
     descriptors = extract_fingerprint_descriptors(image)
     FINGERPRINT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(template_path, descriptors=descriptors)
-    return {"enrolled": True, "voterId": voter_id.strip(), "featureCount": len(descriptors)}
+    profile = load_voter_profiles().get(voter_id.strip(), {})
+    return {"enrolled": True, "voterId": voter_id.strip(), "featureCount": len(descriptors), "name": profile.get("name")}
 
 
 @app.get("/api/fingerprint/status")
@@ -302,13 +406,16 @@ async def verify_fingerprint(voter_id: str, file: UploadFile = File(...)) -> dic
     match_threshold = 12
     verified = good_matches >= match_threshold
 
-    return {
+    result = {
         "verified": verified,
         "goodMatches": good_matches,
         "threshold": match_threshold,
         "verificationStage": "fingerprint-match",
         "message": "Fingerprint verified successfully." if verified else "Fingerprint does not match the stored template.",
     }
+    if verified:
+        result["name"] = load_voter_profiles().get(voter_id.strip(), {}).get("name")
+    return result
 
 
 @app.get("/api/webauthn/status")

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BiometricScanner from '../components/BiometricScanner';
 
-const Login = ({ setIsAuthenticated, setVoterId }) => {
+const Login = ({ setIsAuthenticated, setVoterId, setVoterName }) => {
   const [step, setStep] = useState(1);
   const [voterId, setLocalVoterId] = useState('');
   const navigate = useNavigate();
@@ -16,18 +16,22 @@ const Login = ({ setIsAuthenticated, setVoterId }) => {
     }
   };
 
-  const handleBiometricSuccess = () => {
+  const handleBiometricSuccess = (name) => {
     const cleanedId = voterId.trim();
     if (cleanedId) setVoterId(cleanedId);
+    setVoterName(name || '');
     setIsAuthenticated(true);
     navigate('/vote');
   };
 
   return (
-    <div className="container py-5"><div className="row justify-content-center"><div className="col-md-6 col-lg-5"><div className="card card-dark-custom p-5 shadow-lg">
-      <div className="text-center mb-4"><i className="bi bi-lock-fill fs-1 text-info"></i><h3 className="fw-bold mt-2 text-light">Voter Portal</h3><p className="text-muted small">Secure End-to-End Encryption</p></div>
-      {step === 1 ? <form onSubmit={handleIdSubmit}><div className="mb-4"><label className="form-label text-muted fw-semibold">National Voter ID</label><input type="text" className="form-control form-control-lg" placeholder="e.g. VTR-88492" value={voterId} onChange={(event) => setLocalVoterId(event.target.value)} required /></div><button type="submit" className="btn btn-primary-custom w-100 btn-lg">Verify ID <i className="bi bi-chevron-right ms-2"></i></button></form> : <BiometricScanner voterId={voterId} onSuccess={handleBiometricSuccess} />}
-    </div></div></div></div>
+    <div className="auth-page"><div className="container auth-layout">
+      <aside className="auth-aside"><span className="section-kicker">Secure · Transparent · Trusted</span><h1>Your vote.<br /><span>Your voice.</span></h1><p>Biometric verification for a fair and secure election process.</p><div className="hero-points flex-column align-items-start"><span><i className="bi bi-shield-check"></i> Secure access</span><span><i className="bi bi-people"></i> One person, one vote</span><span><i className="bi bi-file-earmark-check"></i> Transparent process</span></div></aside>
+      <section className="card card-dark-custom auth-card">
+        <div className="text-center mb-4"><div className="auth-icon"><i className="bi bi-lock-fill"></i></div><h2 className="fw-bold mt-2">Voter Portal</h2><p className="text-muted small">Enter your voter ID to securely access your ballot.</p></div>
+        {step === 1 ? <form onSubmit={handleIdSubmit}><div className="mb-4"><label className="form-label fw-semibold">National Voter ID</label><input type="text" className="form-control form-control-lg" placeholder="e.g. VTR-88492" value={voterId} onChange={(event) => setLocalVoterId(event.target.value)} required /></div><button type="submit" className="btn btn-primary-custom w-100 btn-lg">Verify ID <i className="bi bi-arrow-right ms-2"></i></button></form> : <BiometricScanner voterId={voterId} onSuccess={handleBiometricSuccess} />}
+      </section>
+    </div></div>
   );
 };
 

@@ -95,7 +95,7 @@ curl.exe http://127.0.0.1:8000/health
 curl.exe http://127.0.0.1:8000/api/voters/count
 ```
 
-The backend stores face embeddings in `backend/face_templates/` and fingerprint descriptors in `backend/fingerprint_templates/`. Raw biometric images are not stored by the application.
+The backend stores face embeddings in `backend/face_templates/`, fingerprint descriptors in `backend/fingerprint_templates/`, and voter name, age, address, and ward in `backend/voter_profiles.json`, keyed by voter ID. Raw biometric images are not stored by the application. The profile file contains personal information and is excluded from Git; protect it and do not share it.
 
 ## SecuGen Configuration
 
@@ -119,7 +119,7 @@ Open `http://localhost:5173`.
 
 ### Voter flow
 
-1. Open **Register Voter** and capture the face and fingerprint.
+1. An admin signs in and opens **Register Voter** to capture the face and fingerprint.
 2. Use the generated voter ID at **Voter Login**.
 3. Complete face and fingerprint verification.
 4. Connect MetaMask to Ganache and select a funded account.
@@ -128,9 +128,11 @@ Open `http://localhost:5173`.
 ### Admin flow
 
 1. Open **Admin Portal**.
-2. Use the current demo credentials: `admin` / `admin`.
+2. Sign in with `BIOVOTE_ADMIN_USERNAME` and `BIOVOTE_ADMIN_PASSWORD` from `.env`.
 3. The admin panel reads total votes and candidate progress from the deployed contract.
 4. The registered-voter total is read from the biometric backend.
+
+The backend issues an admin token that expires after eight hours and requires it for voter registration. Restarting the backend invalidates active tokens. Keep the admin password private and replace the example value in `.env` before use.
 
 ## Useful Commands
 

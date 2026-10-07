@@ -1,34 +1,50 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const AdminLogin = ({ setIsAdmin }) => {
+const FACE_API_URL = import.meta.env.VITE_FACE_API_URL || 'http://127.0.0.1:8000';
+
+const AdminLogin = ({ setIsAdmin, setAdminToken }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState(false);
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  const handleAdminAuth = (event) => {
+  const handleAdminAuth = async (event) => {
     event.preventDefault();
-    if (username === 'admin' && password === 'admin') {
+    setError('');
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`${FACE_API_URL}/api/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Admin login failed.');
+      setAdminToken(result.token);
       setIsAdmin(true);
       navigate('/admin');
-    } else {
-      setError(true);
+    } catch (loginError) {
+      setError(loginError.message || 'Unable to contact the admin service.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="container py-5">
-      <div className="row justify-content-center"><div className="col-md-6 col-lg-5"><div className="card card-dark-custom p-5 shadow-lg">
-        <div className="text-center mb-4"><i className="bi bi-shield-lock-fill fs-1 text-info"></i><h3 className="fw-bold mt-2 text-light">Admin Portal</h3><p className="text-muted small">Restricted Node Access</p></div>
-        {error && <div className="alert alert-danger py-2 text-center small mb-3">Invalid credentials. Use <strong>admin</strong> / <strong>admin</strong>.</div>}
+    <div className="auth-page"><div className="container auth-layout">
+      <aside className="auth-aside"><span className="section-kicker">Election operations</span><h1>Protect the<br /><span>process.</span></h1><p>Manage voter enrollment and monitor election activity from one secure admin portal.</p><div className="hero-points flex-column align-items-start"><span><i className="bi bi-shield-lock"></i> Restricted access</span><span><i className="bi bi-activity"></i> Live ledger status</span></div></aside>
+      <section className="card card-dark-custom auth-card">
+        <div className="text-center mb-4"><div className="auth-icon"><i className="bi bi-shield-lock-fill"></i></div><h2 className="fw-bold mt-2">Admin Portal</h2><p className="text-muted small">Sign in to manage this election.</p></div>
+        {error && <div className="alert alert-danger py-2 text-center small mb-3">{error}</div>}
         <form onSubmit={handleAdminAuth}>
-          <div className="mb-3"><label className="form-label text-muted small fw-semibold">Admin Username</label><input type="text" className="form-control" placeholder="admin" value={username} onChange={(event) => { setUsername(event.target.value); setError(false); }} required /></div>
-          <div className="mb-4"><label className="form-label text-muted small fw-semibold">Password</label><input type="password" className="form-control" placeholder="********" value={password} onChange={(event) => { setPassword(event.target.value); setError(false); }} required /></div>
-          <button type="submit" className="btn btn-primary-custom w-100 btn-lg">Authenticate Node <i className="bi bi-arrow-right ms-2"></i></button>
+          <div className="mb-3"><label className="form-label small fw-semibold">Admin Username</label><input type="text" className="form-control" placeholder="Admin username" value={username} onChange={(event) => { setUsername(event.target.value); setError(''); }} required /></div>
+          <div className="mb-4"><label className="form-label small fw-semibold">Password</label><input type="password" className="form-control" placeholder="Admin password" value={password} onChange={(event) => { setPassword(event.target.value); setError(''); }} required /></div>
+          <button type="submit" className="btn btn-primary-custom w-100 btn-lg" disabled={isSubmitting}>{isSubmitting ? 'Authenticating...' : 'Authenticate Node'} <i className="bi bi-arrow-right ms-2"></i></button>
         </form>
-      </div></div></div>
-    </div>
+      </section>
+    </div></div>
   );
 };
 

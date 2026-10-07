@@ -10,8 +10,9 @@ const base64ToBlob = (value, type) => {
   return new Blob([bytes], { type });
 };
 
-const Registration = () => {
+const Registration = ({ adminToken }) => {
   const [phase, setPhase] = useState('face');
+  const [voterDetails, setVoterDetails] = useState({ name: '', age: '', address: '', ward: '' });
   const [faceImage, setFaceImage] = useState(null);
   const [voterId, setVoterId] = useState('');
   const [message, setMessage] = useState('');
@@ -30,6 +31,14 @@ const Registration = () => {
   };
 
   const captureFace = async () => {
+    if (!voterDetails.name.trim() || !voterDetails.age || !voterDetails.address.trim() || !voterDetails.ward.trim()) {
+      setError('Complete the voter details before capturing biometrics.');
+      return;
+    }
+    if (Number(voterDetails.age) < 18 || Number(voterDetails.age) > 120) {
+      setError('Voter age must be between 18 and 120.');
+      return;
+    }
     setError('');
     setMessage('Starting camera...');
     setPhase('face-scanning');
@@ -78,10 +87,19 @@ const Registration = () => {
       setPhase('submitting');
       setMessage('Saving biometric templates and generating voter ID...');
       const formData = new FormData();
+      formData.append('name', voterDetails.name.trim());
+      formData.append('age', voterDetails.age);
+      formData.append('address', voterDetails.address.trim());
+      formData.append('ward', voterDetails.ward.trim());
       formData.append('face_file', faceImage, 'face-capture.jpg');
       formData.append('fingerprint_file', base64ToBlob(capture.BMPBase64, 'image/bmp'), 'fingerprint-capture.bmp');
-      const registrationResponse = await fetch(`${FACE_API_URL}/api/voters/register`, { method: 'POST', body: formData });
+      const registrationResponse = await fetch(`${FACE_API_URL}/api/voters/register`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: formData,
+      });
       const result = await registrationResponse.json();
+      if (registrationResponse.status === 401) throw new Error('Admin session expired. Log in again.');
       if (!registrationResponse.ok) throw new Error(result.detail || 'Voter registration failed.');
       setVoterId(result.voterId);
       setPhase('complete');
@@ -93,32 +111,70 @@ const Registration = () => {
   };
 
   return (
-    <div className="container py-5">
-      <div className="row justify-content-center">
-        <div className="col-md-8 col-lg-6">
-          <div className="card card-dark-custom p-4 p-md-5 shadow-lg">
-            <div className="text-center mb-4">
-              <i className="bi bi-person-plus-fill fs-1 text-info"></i>
-              <h3 className="fw-bold mt-2 text-light">Register New Voter</h3>
-              <p className="text-muted small mb-0">Capture both biometrics to create a voter identity.</p>
+    <div className="container registration-page py-5">
+      <div className="registration-shell">
+        <header className="registration-header">
+          <span className="auth-icon"><i className="bi bi-person-plus-fill"></i></span>
+          <div><h1>Register New Voter</h1><p>Enter voter details and capture biometric information.</p></div>
+        </header>
+
+        {phase === 'complete' ? (
+          <section className="registration-complete">
+            <div className="success-mark"><i className="bi bi-check-lg"></i></div>
+            <h2>Voter registered</h2>
+            <p>{message}</p>
+            <div className="registration-id"><small>Voter</small><strong>{voterDetails.name}</strong><small>Voter ID</small><b>{voterId}</b></div>
+          </section>
+        ) : (
+          <>
+            <div className="steps-track registration-steps">
+              <div className={`step-item ${phase.startsWith('face') ? 'is-active' : 'is-complete'}`}><span className="step-number">{phase.startsWith('face') ? '1' : <i className="bi bi-check"></i>}</span>Voter details</div>
+              <div className={`step-item ${phase.includes('fingerprint') || phase === 'submitting' ? 'is-active' : phase === 'face' || phase === 'face-scanning' ? '' : 'is-complete'}`}><span className="step-number">2</span>Biometric registration</div>
+              <div className={`step-item ${phase === 'submitting' ? 'is-active' : ''}`}><span className="step-number">3</span>Save voter</div>
             </div>
 
-            <div className="d-flex justify-content-center gap-2 mb-4">
-              <span className={`badge ${phase.startsWith('face') ? 'bg-info text-dark' : 'bg-success'}`}>1. Face</span>
-              <span className={`badge ${phase.includes('fingerprint') || phase === 'submitting' ? 'bg-info text-dark' : phase === 'complete' ? 'bg-success' : 'bg-secondary'}`}>2. Fingerprint</span>
+            <div className="registration-layout">
+              <section className="registration-details-panel">
+                <div className="registration-section-heading"><span className="icon-disc"><i className="bi bi-person-lines-fill"></i></span><div><h2>Voter details</h2><p>Fill in the required information.</p></div></div>
+                <div className="registration-fields">
+                  <div className="mb-3"><label className="form-label">Full name <span>*</span></label><input className="form-control" autoComplete="name" placeholder="Enter full name" value={voterDetails.name} onChange={(event) => setVoterDetails({ ...voterDetails, name: event.target.value })} required /></div>
+                  <div className="mb-3"><label className="form-label">Age <span>*</span></label><input className="form-control" type="number" min="18" max="120" placeholder="Enter age" value={voterDetails.age} onChange={(event) => setVoterDetails({ ...voterDetails, age: event.target.value })} required /></div>
+                  <div className="mb-3 registration-address"><label className="form-label">Address <span>*</span></label><textarea className="form-control" autoComplete="street-address" rows="3" placeholder="Enter complete address" value={voterDetails.address} onChange={(event) => setVoterDetails({ ...voterDetails, address: event.target.value })} required /></div>
+                  <div className="mb-3"><label className="form-label">Ward <span>*</span></label><input className="form-control" placeholder="Enter ward" value={voterDetails.ward} onChange={(event) => setVoterDetails({ ...voterDetails, ward: event.target.value })} required /></div>
+                </div>
+                <p className="registration-required-note"><i className="bi bi-info-circle-fill"></i> All fields are required. Voter information is stored with the generated voter ID.</p>
+              </section>
+
+              <section className="registration-biometric-panel">
+                <div className="registration-section-heading"><span className="icon-disc"><i className="bi bi-shield-fill-check"></i></span><div><h2>Biometric registration</h2><p>Capture the voter’s face and fingerprint.</p></div></div>
+                <div className="biometric-info mb-3"><i className="bi bi-check-circle-fill me-2"></i>Capture clear biometric data for accurate verification.</div>
+                <div className="registration-capture-grid">
+                  <article className={`registration-capture-card ${phase.startsWith('face') ? 'is-current' : ''}`}>
+                    <h3><span className="capture-icon"><i className="bi bi-camera-fill"></i></span>Face capture</h3>
+                    <p>Look toward the camera in good lighting.</p>
+                    <div className="registration-capture-view">
+                      {phase.startsWith('face') ? <video ref={videoRef} className="scanner-video" muted playsInline /> : <i className={`bi ${faceImage ? 'bi-person-bounding-box text-success' : 'bi-person'}`}></i>}
+                      {phase === 'face-scanning' && <div className="scanner-laser"></div>}
+                    </div>
+                    {phase === 'face' && <button onClick={captureFace} className="btn btn-primary-custom w-100"><i className="bi bi-camera-fill"></i> Capture face</button>}
+                    {phase === 'face-scanning' && <div className="capture-status text-info">{message}</div>}
+                    {faceImage && !phase.startsWith('face') && <div className="capture-status text-success"><i className="bi bi-check-circle-fill me-1"></i>Face captured</div>}
+                  </article>
+
+                  <article className={`registration-capture-card ${phase === 'fingerprint' || phase === 'fingerprint-scanning' ? 'is-current' : ''}`}>
+                    <h3><span className="capture-icon capture-icon--green"><i className="bi bi-fingerprint"></i></span>Fingerprint capture</h3>
+                    <p>Place the voter’s finger on the sensor.</p>
+                    <div className="registration-capture-view registration-fingerprint-view"><i className="bi bi-fingerprint"></i><div className={`scanner-laser ${phase === 'fingerprint-scanning' || phase === 'submitting' ? 'is-visible' : ''}`}></div></div>
+                    {phase === 'fingerprint' && <button onClick={captureFingerprintAndRegister} className="btn btn-success w-100"><i className="bi bi-fingerprint"></i> Capture fingerprint</button>}
+                    {(phase === 'fingerprint-scanning' || phase === 'submitting') && <div className="capture-status text-info">{message}</div>}
+                    {phase === 'face' && <div className="capture-status text-muted">Capture the face first.</div>}
+                  </article>
+                </div>
+                {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}
+              </section>
             </div>
-
-            {phase.startsWith('face') && <div className="scanner-container mb-4"><video ref={videoRef} className="scanner-video" muted playsInline /></div>}
-            {phase === 'fingerprint' || phase === 'fingerprint-scanning' || phase === 'submitting' ? <div className={`scanner-container mb-4 ${phase !== 'fingerprint' ? 'scanner-active' : ''}`}><i className="bi bi-fingerprint scanner-icon"></i><div className="scanner-laser"></div></div> : null}
-
-            {phase === 'face' && <button onClick={captureFace} className="btn btn-primary-custom w-100">Capture Face <i className="bi bi-camera ms-2"></i></button>}
-            {phase === 'face-scanning' && <div className="text-info fw-bold text-center">{message}</div>}
-            {phase === 'fingerprint' && <button onClick={captureFingerprintAndRegister} className="btn btn-primary-custom w-100">Capture Fingerprint <i className="bi bi-fingerprint ms-2"></i></button>}
-            {(phase === 'fingerprint-scanning' || phase === 'submitting') && <div className="text-info fw-bold text-center">{message}</div>}
-            {phase === 'complete' && <div className="text-center"><div className="text-success fw-bold mb-3">{message}</div><div className="border border-success rounded p-3"><small className="text-muted d-block">New voter ID</small><strong className="text-info fs-2 font-monospace">{voterId}</strong></div></div>}
-            {error && <div className="text-danger small mt-3 text-center">{error}</div>}
-          </div>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

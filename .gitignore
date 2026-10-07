@@ -14,6 +14,7 @@ backend/fingerprint_enrollment_images/*
 backend/face_templates/*
 backend/fingerprint_templates/*
 backend/webauthn_credentials.json
+backend/voter_profiles.json
 
 # Local environment files
 .venv/

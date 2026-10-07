@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { candidatesData } from '../data/mockData';
 import { getContract } from '../lib/ethereum';
 
-const candidateList = [
-  { id: 0, name: 'Dr. Alan Turing', party: 'Techno-Progressive Party', manifesto: 'Advancing computational rights, securing digital privacy, and ensuring unbreakable cryptographic integrity for all citizen data.', icon: 'bi-cpu' },
-  { id: 1, name: 'Ada Lovelace', party: 'Analytical Engine Coalition', manifesto: 'Pioneering analytical frameworks, advocating for algorithmic transparency, and funding next-generation technological education.', icon: 'bi-braces-asterisk' },
-  { id: 2, name: 'Grace Hopper', party: 'Compiler Consortium', manifesto: 'Debugging the bureaucratic machine. Promising less red tape and highly optimized governmental processes for the modern era.', icon: 'bi-bug' },
-];
+const candidateList = candidatesData.map((candidate, id) => ({
+  ...candidate,
+  id,
+  active: true,
+}));
 
-const VotingDashboard = ({ isAuthenticated, voterId }) => {
+const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
   const navigate = useNavigate();
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [isVoting, setIsVoting] = useState(false);
@@ -64,60 +65,90 @@ const VotingDashboard = ({ isAuthenticated, voterId }) => {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="container py-5">
-      <div className="d-flex justify-content-between align-items-center mb-4 border-bottom border-secondary pb-3">
-        <h2 className="fw-bold text-light">Official Secure Ballot</h2>
-        <span className="badge bg-success px-3 py-2 rounded-pill"><i className="bi bi-shield-check me-1"></i> Biometric Session Verified</span>
-      </div>
-
-      {walletAddress && (
-        <div className="alert alert-dark border-secondary text-light small mb-4">
-          <strong>Wallet:</strong> {walletAddress}
+    <>
+      <header className="ballot-header">
+        <div className="container">
+          <span className="section-kicker">General election 2026</span>
+          <h1>{txHash ? <>Vote successfully <span>registered</span></> : <>Cast your <span>vote</span></>}</h1>
+          <p>{txHash ? 'Your confirmed ballot has been recorded on the blockchain.' : 'Select one candidate and review your choice before confirming.'}</p>
         </div>
-      )}
-
-      {txHash ? (
-        <div className="card card-dark-custom p-5 text-center shadow-lg border-success">
-          <i className="bi bi-check-circle-fill display-3 text-success mb-3"></i>
-          <h3 className="fw-bold text-light">Vote Successfully Registered</h3>
-          <p className="text-muted mb-2">Your ballot was recorded on Ethereum through MetaMask.</p>
-          <div className="bg-dark p-3 rounded mt-3 text-break font-monospace small border border-secondary text-info">
-            <strong>Transaction Hash:</strong><br />{txHash}
+      </header>
+      <div className="container py-4 py-lg-5">
+        <div className="ballot-steps">
+          <div className="steps-track mb-0">
+            <div className="step-item is-complete"><span className="step-number"><i className="bi bi-check"></i></span>Enter voter ID</div>
+            <div className="step-item is-complete"><span className="step-number"><i className="bi bi-check"></i></span>Biometric verification</div>
+            <div className={`step-item ${txHash ? 'is-complete' : 'is-active'}`}><span className="step-number">{txHash ? <i className="bi bi-check"></i> : '3'}</span>{txHash ? 'Vote confirmed' : 'Select & cast vote'}</div>
           </div>
-          <button onClick={() => navigate('/')} className="btn btn-outline-success mt-4 px-5 mx-auto">Return to Home</button>
         </div>
-      ) : (
-        <>
-          <div className="row g-4">
-            {candidateList.map((candidate) => (
-              <div className="col-md-4" key={candidate.id}>
-                <div className={`card card-dark-custom card-hover h-100 ${selectedCandidate === candidate.id ? 'border-info border-2' : ''}`} onClick={() => setSelectedCandidate(candidate.id)} style={{ cursor: 'pointer' }}>
-                  <div className="card-body text-center p-4">
-                    <i className={`bi ${candidate.icon} display-4 mb-3 text-info`}></i>
-                    <h4 className="fw-bold text-light">{candidate.name}</h4>
-                    <span className="badge bg-secondary mb-3">{candidate.party}</span>
-                    <p className="text-muted small text-start mt-2">"{candidate.manifesto}"</p>
-                  </div>
-                  <div className="card-footer bg-transparent border-0 text-center pb-4">
-                    <div className={`form-check d-inline-block ${selectedCandidate === candidate.id ? 'text-info' : 'text-muted'}`}>
-                      <input className="form-check-input fs-4" type="radio" checked={selectedCandidate === candidate.id} readOnly />
-                    </div>
-                  </div>
-                </div>
+
+        {walletAddress && <div className="wallet-banner alert small mb-3"><strong>Connected wallet</strong><span className="ms-2 font-monospace">{walletAddress}</span></div>}
+
+        {txHash ? (
+          <section className="vote-success card card-dark-custom">
+            <div className="success-mark"><i className="bi bi-check-lg"></i></div>
+            <h2 className="fw-bold">Your vote is on the ledger.</h2>
+            <p className="text-muted">Thank you for participating in a fair and transparent election.</p>
+            <div className="transaction-panel">
+              <div className="d-flex align-items-center gap-3">
+                <span className="icon-disc"><i className="bi bi-link-45deg"></i></span>
+                <div className="overflow-hidden"><strong className="d-block">Transaction hash</strong><span className="font-monospace small text-info text-break">{txHash}</span></div>
+                <button type="button" className="btn btn-outline-info ms-auto flex-shrink-0" title="Copy transaction hash" aria-label="Copy transaction hash" onClick={() => navigator.clipboard?.writeText(txHash)}><i className="bi bi-copy"></i></button>
               </div>
-            ))}
-          </div>
+              <small className="d-block text-muted mt-2">This transaction is stored on the election ledger.</small>
+            </div>
+            <div className="success-points">
+              <div className="success-point"><span className="icon-disc"><i className="bi bi-shield-check"></i></span><h3>Secure</h3><p>Your vote is recorded safely.</p></div>
+              <div className="success-point"><span className="icon-disc" style={{ color: '#10945f', background: '#e5f8ee' }}><i className="bi bi-lock-fill"></i></span><h3>Private</h3><p>Your identity stays separate.</p></div>
+              <div className="success-point"><span className="icon-disc" style={{ color: '#7651d4', background: '#f0eaff' }}><i className="bi bi-box"></i></span><h3>Tamper-resistant</h3><p>Recorded on blockchain.</p></div>
+              <div className="success-point"><span className="icon-disc" style={{ color: '#d66c19', background: '#fff0df' }}><i className="bi bi-file-earmark-text"></i></span><h3>Transparent</h3><p>Transaction can be audited.</p></div>
+            </div>
+            <button onClick={() => navigate('/')} className="btn btn-primary-custom mx-auto px-5"><i className="bi bi-house-fill"></i> Return to Home</button>
+          </section>
+        ) : (
+          <div className="ballot-layout">
+            <section className="ballot-main">
+              <h2 className="ballot-title"><i className="bi bi-people-fill text-info me-2"></i>Candidates / Parties</h2>
+              <p className="ballot-subtitle">Choose one candidate to continue.</p>
+              <div className="row g-3">
+                {candidateList.map((candidate) => {
+                  const isSelected = candidate.chainId !== null && selectedCandidate === candidate.chainId;
+                  const isUnavailable = candidate.chainId === null;
+                  return <div className="col-sm-6 col-xl-4" key={candidate.id}>
+                    <article role="button" tabIndex={isUnavailable ? -1 : 0} aria-pressed={isSelected} aria-disabled={isUnavailable} className={`candidate-card ${isSelected ? 'is-selected' : ''} ${isUnavailable ? 'candidate-card--disabled' : ''}`} onClick={() => !isUnavailable && setSelectedCandidate(candidate.chainId)} onKeyDown={(event) => { if (!isUnavailable && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setSelectedCandidate(candidate.chainId); } }}>
+                      <span className="candidate-icon"><i className={`bi ${candidate.icon}`}></i></span>
+                      <h3 className="candidate-name">{candidate.name}</h3>
+                      <div className="candidate-party">{candidate.party}</div>
+                      <p className="candidate-manifesto">{candidate.manifesto}</p>
+                      {isUnavailable && <span className="badge bg-warning text-dark">Awaiting ballot deployment</span>}
+                      <div><input className="form-check-input candidate-radio" type="radio" checked={isSelected} disabled={isUnavailable} readOnly aria-label={`Select ${candidate.name}`} /></div>
+                    </article>
+                  </div>;
+                })}
+              </div>
+              {voteError && <div className="alert alert-danger mt-3 mb-0">{voteError}</div>}
+            </section>
 
-          {voteError && <div className="alert alert-danger mt-4 mb-0">{voteError}</div>}
-
-          <div className="text-center mt-5">
-            <button className="btn btn-primary-custom btn-lg px-5 py-3 shadow" disabled={selectedCandidate === null || isVoting} onClick={castVote}>
-              {isVoting ? <><span className="spinner-border spinner-border-sm me-2"></span> Confirming MetaMask transaction...</> : <><i className="bi bi-wallet2 me-2"></i> Cast Vote with MetaMask</>}
-            </button>
+            <aside className="ballot-sidebar d-grid gap-3">
+              <section className="info-panel">
+                <h3><i className="bi bi-person-vcard text-info me-2"></i>Voter information</h3>
+                <div className="d-flex justify-content-between py-2 border-bottom"><span className="text-muted small">Name</span><strong className="small">{voterName || 'Voter'}</strong></div>
+                <div className="d-flex justify-content-between py-2 border-bottom"><span className="text-muted small">Voter ID</span><strong className="small">{voterId}</strong></div>
+                <div className="d-flex justify-content-between py-2"><span className="text-muted small">Verification</span><strong className="small text-success"><i className="bi bi-check-circle-fill me-1"></i>Verified</strong></div>
+              </section>
+              <section className="info-panel">
+                <h3><i className="bi bi-shield-check text-info me-2"></i>Before you cast</h3>
+                <ul><li>You can select one candidate.</li><li>A confirmed vote cannot be changed.</li><li>Your vote is recorded on the blockchain.</li></ul>
+              </section>
+              {selectedCandidate !== null && <section className="review-selection"><span className="small fw-bold text-info">Review selection</span><strong className="d-block mt-1">{candidateList.find((candidate) => candidate.chainId === selectedCandidate)?.name}</strong></section>}
+              <button className="btn btn-primary-custom w-100" disabled={selectedCandidate === null || isVoting} onClick={castVote}>
+                {isVoting ? <><span className="spinner-border spinner-border-sm me-2"></span> Confirming transaction...</> : <>Continue &amp; cast vote <i className="bi bi-arrow-right"></i></>}
+              </button>
+            </aside>
           </div>
-        </>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 };
 

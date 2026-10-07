@@ -31,13 +31,37 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
     const video = videoRef.current;
     if (!video || video.readyState < 2) throw new Error('Camera is not ready yet.');
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     const image = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    if (!image) throw new Error('Unable to capture a face image.');
     const formData = new FormData();
     formData.append('file', image, 'face-capture.jpg');
-    const response = await fetch(`${FACE_API_URL}/api/face/verify?voter_id=${encodeURIComponent(voterId)}`, { method: 'POST', body: formData });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const endpoint = `${FACE_API_URL}/api/face/verify?voter_id=${encodeURIComponent(voterId)}`;
+    const requestStartedAt = performance.now();
+    setMessage('Sending face image to the biometric service...');
+    console.info('[BioVoteChain] Sending face verification request');
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      console.info(`[BioVoteChain] Face verification responded with HTTP ${response.status} in ${((performance.now() - requestStartedAt) / 1000).toFixed(2)}s`);
+      setMessage('Biometric service responded. Checking the face match...');
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Face verification timed out. Check that the biometric service is running, then try again.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'Face verification failed.');
     if (!result.verified) throw new Error(result.message);
@@ -96,7 +120,7 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
         if (!enrollmentResponse.ok) throw new Error(result.detail || 'Fingerprint enrollment failed.');
         setScanState('success');
         setMessage('SecuGen fingerprint enrolled and verified.');
-        setTimeout(() => { setPhase('completed'); onSuccess(); }, 1200);
+        setTimeout(() => { setPhase('completed'); onSuccess(result.name); }, 1200);
         return;
       }
 
@@ -110,7 +134,7 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
       if (!result.verified) throw new Error(result.message || 'Fingerprint does not match the enrolled template.');
       setScanState('success');
       setMessage(result.message);
-      setTimeout(() => { setPhase('completed'); onSuccess(); }, 1200);
+      setTimeout(() => { setPhase('completed'); onSuccess(result.name); }, 1200);
     } catch (error) {
       setScanState('error');
       setMessage(error.message || 'Unable to verify this fingerprint.');
@@ -121,9 +145,10 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
     <div className="text-center py-2">
       <h5 className="mb-2 text-light">Mandatory Biometric Verification</h5>
       <p className="text-muted small mb-4">{phase === 'face' ? 'Step 1 of 2: Facial Geometry Scan' : 'Step 2 of 2: Dermatoglyphic Fingerprint Scan'}</p>
-      <div className="d-flex justify-content-center gap-2 mb-4">
-        <span className={`badge ${phase === 'face' ? 'bg-info text-dark' : 'bg-success'}`}>1. Facial Scan {phase !== 'face' && <i className="bi bi-check-lg"></i>}</span>
-        <span className={`badge ${phase === 'fingerprint' ? 'bg-info text-dark' : phase === 'completed' ? 'bg-success' : 'bg-secondary'}`}>2. Fingerprint Scan {phase === 'completed' && <i className="bi bi-check-lg"></i>}</span>
+      <div className="steps-track">
+        <div className={`step-item ${phase === 'face' ? 'is-active' : 'is-complete'}`}><span className="step-number">{phase === 'face' ? '1' : <i className="bi bi-check"></i>}</span>Face verification</div>
+        <div className={`step-item ${phase === 'fingerprint' ? 'is-active' : phase === 'completed' ? 'is-complete' : ''}`}><span className="step-number">{phase === 'completed' ? <i className="bi bi-check"></i> : '2'}</span>Fingerprint</div>
+        <div className={`step-item ${phase === 'completed' ? 'is-complete' : ''}`}><span className="step-number">{phase === 'completed' ? <i className="bi bi-check"></i> : '3'}</span>Access ballot</div>
       </div>
       <div className={`scanner-container mb-4 ${scanState === 'scanning' ? 'scanner-active' : ''}`}>
         {phase === 'face' && <video ref={videoRef} className="scanner-video" muted playsInline />}
