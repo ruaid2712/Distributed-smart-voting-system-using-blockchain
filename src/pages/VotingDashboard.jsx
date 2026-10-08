@@ -1,17 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { candidatesData } from '../data/mockData';
+import BiometricScanner from '../components/BiometricScanner';
 import { getContract } from '../lib/ethereum';
-
-const FACE_API_URL = import.meta.env.VITE_FACE_API_URL || 'http://127.0.0.1:8000';
-const SECUGEN_API_URL = 'https://localhost:8443/SGIFPCapture';
-const SECUGEN_LICENSE = import.meta.env.VITE_SECUGEN_LICENSE || '';
-
-const base64ToBlob = (value, type) => {
-  const binary = window.atob(value);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  return new Blob([bytes], { type });
-};
 
 const candidateList = candidatesData.map((candidate, id) => ({
   ...candidate,
@@ -26,7 +17,7 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
   const [txHash, setTxHash] = useState('');
   const [voteError, setVoteError] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
-  const [voteMessage, setVoteMessage] = useState('');
+  const [showVoteVerification, setShowVoteVerification] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) navigate('/login');
@@ -45,7 +36,7 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
     initWallet();
   }, []);
 
-  const castVote = async () => {
+  const submitVote = async () => {
     if (!selectedCandidate && selectedCandidate !== 0) return;
     if (!voterId || !String(voterId).trim()) {
       setVoteError('A valid voter ID is required before submitting the ballot.');
@@ -55,48 +46,6 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
     try {
       setIsVoting(true);
       setVoteError('');
-      setVoteMessage('Place your finger on the SecuGen reader to verify your identity.');
-
-      const captureResponse = await fetch(SECUGEN_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          Timeout: '10000',
-          Quality: '50',
-          licstr: SECUGEN_LICENSE,
-          templateFormat: 'ISO',
-          imageWSQRate: '0.75',
-        }),
-      });
-      if (!captureResponse.ok) {
-        throw new Error(`SecuGen service returned HTTP ${captureResponse.status}.`);
-      }
-
-      const capture = await captureResponse.json();
-      if (capture.ErrorCode !== 0) {
-        const detail = capture.ErrorCode >= 10000
-          ? 'Check the SecuGen license configuration.'
-          : 'Check that the reader is connected.';
-        throw new Error(`SecuGen capture failed (error ${capture.ErrorCode}). ${detail}`);
-      }
-      if (!capture.BMPBase64) throw new Error('SecuGen returned no fingerprint image.');
-
-      setVoteMessage('Checking your fingerprint against the enrolled template...');
-      const formData = new FormData();
-      formData.append('file', base64ToBlob(capture.BMPBase64, 'image/bmp'), 'fingerprint.bmp');
-      const verificationResponse = await fetch(
-        `${FACE_API_URL}/api/fingerprint/verify?voter_id=${encodeURIComponent(String(voterId).trim())}`,
-        { method: 'POST', body: formData },
-      );
-      const verification = await verificationResponse.json();
-      if (!verificationResponse.ok) {
-        throw new Error(verification.detail || 'Fingerprint verification failed.');
-      }
-      if (!verification.verified) {
-        throw new Error(verification.message || 'Fingerprint does not match the enrolled template.');
-      }
-
-      setVoteMessage('Fingerprint verified. Confirm the transaction in your wallet.');
       const contract = await getContract();
       const wallet = await contract.runner.getAddress();
       if (await contract.hasVoted(wallet)) {
@@ -108,11 +57,9 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
 
       setTxHash(receipt?.hash || tx.hash);
       setIsVoting(false);
-      setVoteMessage('');
     } catch (error) {
       setVoteError(error?.message || 'Unable to cast the vote on the blockchain.');
       setIsVoting(false);
-      setVoteMessage('');
     }
   };
 
@@ -132,7 +79,7 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
           <div className="steps-track mb-0">
             <div className="step-item is-complete"><span className="step-number"><i className="bi bi-check"></i></span>Enter voter ID</div>
             <div className="step-item is-complete"><span className="step-number"><i className="bi bi-check"></i></span>Biometric verification</div>
-            <div className={`step-item ${txHash ? 'is-complete' : 'is-active'}`}><span className="step-number">{txHash ? <i className="bi bi-check"></i> : '3'}</span>{txHash ? 'Vote confirmed' : 'Fingerprint & cast vote'}</div>
+            <div className={`step-item ${txHash ? 'is-complete' : 'is-active'}`}><span className="step-number">{txHash ? <i className="bi bi-check"></i> : '3'}</span>{txHash ? 'Vote confirmed' : 'Verify & cast vote'}</div>
           </div>
         </div>
 
@@ -163,7 +110,7 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
           <div className="ballot-layout">
             <section className="ballot-main">
               <h2 className="ballot-title"><i className="bi bi-people-fill text-info me-2"></i>Candidates / Parties</h2>
-              <p className="ballot-subtitle">Choose one candidate, then verify your fingerprint to submit your vote.</p>
+                <p className="ballot-subtitle">Choose one candidate, then verify with face or fingerprint to submit your vote.</p>
               <div className="row g-3">
                 {candidateList.map((candidate) => {
                   const isSelected = candidate.chainId !== null && selectedCandidate === candidate.chainId;
@@ -180,7 +127,6 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
                   </div>;
                 })}
               </div>
-              {voteError && <div className="alert alert-danger mt-3 mb-0">{voteError}</div>}
             </section>
 
             <aside className="ballot-sidebar d-grid gap-3">
@@ -192,16 +138,24 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
               </section>
               <section className="info-panel">
                 <h3><i className="bi bi-shield-check text-info me-2"></i>Before you cast</h3>
-                <ul><li>You can select one candidate.</li><li>A confirmed vote cannot be changed.</li><li>Your vote is recorded on the blockchain.</li></ul>
+                <ul><li>You can select one candidate.</li><li>Verify using face or fingerprint.</li><li>A confirmed vote is recorded on the blockchain.</li></ul>
               </section>
               {selectedCandidate !== null && <section className="review-selection"><span className="small fw-bold text-info">Review selection</span><strong className="d-block mt-1">{candidateList.find((candidate) => candidate.chainId === selectedCandidate)?.name}</strong></section>}
-              {isVoting && <div className="text-info small text-center" role="status"><span className="spinner-border spinner-border-sm me-2"></span>{voteMessage}</div>}
-              <button className="btn btn-primary-custom w-100" disabled={selectedCandidate === null || isVoting} onClick={castVote}>
-                {isVoting ? <>Verify fingerprint &amp; cast vote...</> : <><i className="bi bi-fingerprint me-2"></i>Verify fingerprint &amp; cast vote</>}
+              <button className="btn btn-primary-custom w-100" disabled={selectedCandidate === null || isVoting} onClick={() => { setVoteError(''); setShowVoteVerification(true); }}>
+                <i className="bi bi-shield-check me-2"></i>Verify identity &amp; cast vote
               </button>
             </aside>
           </div>
         )}
+        {!txHash && showVoteVerification && <section className="vote-verification-panel admin-panel mt-4">
+          <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+            <div><h2 className="admin-panel-title">Verify &amp; submit ballot</h2><p className="text-muted small mb-0">Selected candidate: {candidateList.find((candidate) => candidate.chainId === selectedCandidate)?.name}</p></div>
+            <button className="btn btn-outline-light btn-sm" disabled={isVoting} onClick={() => setShowVoteVerification(false)}>Change selection</button>
+          </div>
+          <BiometricScanner voterId={voterId} onSuccess={submitVote} />
+          {isVoting && <div className="text-info small text-center mt-2" role="status"><span className="spinner-border spinner-border-sm me-2"></span>Confirm the blockchain transaction in your wallet...</div>}
+          {voteError && <div className="alert alert-danger mt-3 mb-0">{voteError}</div>}
+        </section>}
       </div>
     </>
   );

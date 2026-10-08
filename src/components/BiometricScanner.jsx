@@ -11,8 +11,10 @@ const base64ToBlob = (value, type) => {
 };
 
 const BiometricScanner = ({ voterId, onSuccess }) => {
-  const [phase, setPhase] = useState('face');
   const [scanState, setScanState] = useState('idle');
+  const [activeMethod, setActiveMethod] = useState(null);
+  const [verifiedMethod, setVerifiedMethod] = useState(null);
+  const [verifiedName, setVerifiedName] = useState('');
   const [message, setMessage] = useState('');
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -65,22 +67,27 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'Face verification failed.');
     if (!result.verified) throw new Error(result.message);
+    return result;
   };
 
   const startFaceScan = async () => {
+    setActiveMethod('face');
+    setVerifiedMethod(null);
+    setVerifiedName('');
     setScanState('scanning');
     setMessage('Starting camera...');
     try {
       streamRef.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       videoRef.current.srcObject = streamRef.current;
       await videoRef.current.play();
-      setMessage('Hold still while your face is compared...');
+      setMessage('Look into the camera and hold still...');
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      await verifyCapturedFace();
+      const result = await verifyCapturedFace();
       stopCamera();
       setScanState('success');
       setMessage('Face verified successfully.');
-      setTimeout(() => { setPhase('fingerprint'); setScanState('idle'); setMessage(''); }, 1200);
+      setVerifiedMethod('face');
+      setVerifiedName(result.name || '');
     } catch (error) {
       stopCamera();
       setScanState('error');
@@ -89,6 +96,9 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
   };
 
   const startFingerprintScan = async () => {
+    setActiveMethod('fingerprint');
+    setVerifiedMethod(null);
+    setVerifiedName('');
     setScanState('scanning');
     setMessage('Place your finger on the SecuGen reader...');
     try {
@@ -106,24 +116,6 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
       if (!capture.BMPBase64) throw new Error('SecuGen returned no fingerprint image.');
 
       const fingerprintImage = base64ToBlob(capture.BMPBase64, 'image/bmp');
-      const statusResponse = await fetch(`${FACE_API_URL}/api/fingerprint/status?voter_id=${encodeURIComponent(voterId)}`);
-      const status = await statusResponse.json();
-      if (!statusResponse.ok) throw new Error(status.detail || 'Unable to check fingerprint enrollment.');
-
-      if (!status.enrolled) {
-        const formData = new FormData();
-        formData.append('file', fingerprintImage, 'fingerprint.bmp');
-        const enrollmentResponse = await fetch(`${FACE_API_URL}/api/fingerprint/enroll/${encodeURIComponent(voterId)}`, {
-          method: 'POST', body: formData,
-        });
-        const result = await enrollmentResponse.json();
-        if (!enrollmentResponse.ok) throw new Error(result.detail || 'Fingerprint enrollment failed.');
-        setScanState('success');
-        setMessage('SecuGen fingerprint enrolled and verified.');
-        setTimeout(() => { setPhase('completed'); onSuccess(result.name); }, 1200);
-        return;
-      }
-
       const formData = new FormData();
       formData.append('file', fingerprintImage, 'fingerprint.bmp');
       const verificationResponse = await fetch(`${FACE_API_URL}/api/fingerprint/verify?voter_id=${encodeURIComponent(voterId)}`, {
@@ -134,7 +126,8 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
       if (!result.verified) throw new Error(result.message || 'Fingerprint does not match the enrolled template.');
       setScanState('success');
       setMessage(result.message);
-      setTimeout(() => { setPhase('completed'); onSuccess(result.name); }, 1200);
+      setVerifiedMethod('fingerprint');
+      setVerifiedName(result.name || '');
     } catch (error) {
       setScanState('error');
       setMessage(error.message || 'Unable to verify this fingerprint.');
@@ -142,24 +135,53 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
   };
 
   return (
-    <div className="text-center py-2">
-      <h5 className="mb-2 text-light">Mandatory Biometric Verification</h5>
-      <p className="text-muted small mb-4">{phase === 'face' ? 'Step 1 of 2: Facial Geometry Scan' : 'Step 2 of 2: Dermatoglyphic Fingerprint Scan'}</p>
+    <div className="biometric-login">
       <div className="steps-track">
-        <div className={`step-item ${phase === 'face' ? 'is-active' : 'is-complete'}`}><span className="step-number">{phase === 'face' ? '1' : <i className="bi bi-check"></i>}</span>Face verification</div>
-        <div className={`step-item ${phase === 'fingerprint' ? 'is-active' : phase === 'completed' ? 'is-complete' : ''}`}><span className="step-number">{phase === 'completed' ? <i className="bi bi-check"></i> : '2'}</span>Fingerprint</div>
-        <div className={`step-item ${phase === 'completed' ? 'is-complete' : ''}`}><span className="step-number">{phase === 'completed' ? <i className="bi bi-check"></i> : '3'}</span>Access ballot</div>
+        <div className="step-item is-complete"><span className="step-number"><i className="bi bi-check"></i></span>Enter voter ID</div>
+        <div className={`step-item ${verifiedMethod ? 'is-complete' : 'is-active'}`}><span className="step-number">{verifiedMethod ? <i className="bi bi-check"></i> : '2'}</span>Biometric verification</div>
+        <div className="step-item"><span className="step-number">3</span>Access ballot</div>
       </div>
-      <div className={`scanner-container mb-4 ${scanState === 'scanning' ? 'scanner-active' : ''}`}>
-        {phase === 'face' && <video ref={videoRef} className="scanner-video" muted playsInline />}
-        <div className="scanner-laser"></div>
-        {phase !== 'face' && <i className="bi bi-fingerprint scanner-icon"></i>}
+
+      <div className="biometric-login-heading">
+        <h2>Biometric Verification</h2>
+        <p>Verify your identity using one method to continue.</p>
       </div>
-      {scanState === 'idle' && <button onClick={phase === 'face' ? startFaceScan : startFingerprintScan} className="btn btn-primary-custom w-100">Initialize {phase === 'face' ? 'Camera Feed' : 'Fingerprint Reader'}</button>}
-      {scanState === 'scanning' && <div className="text-info fw-bold pulse-icon"><i className="bi bi-arrow-repeat me-2"></i>{message}</div>}
-      {scanState === 'success' && <div className="text-success fw-bold"><i className="bi bi-check-circle-fill me-2"></i>{message}</div>}
-      {scanState === 'error' && <div className="text-danger small mt-3">{message}</div>}
-      {scanState === 'error' && <button onClick={() => setScanState('idle')} className="btn btn-outline-light mt-3">Try Again</button>}
+
+      <div className="login-biometric-options">
+        <section className={`bio-panel login-bio-option ${verifiedMethod === 'face' ? 'is-verified' : ''}`}>
+          <span className="login-bio-icon login-bio-icon-face"><i className={verifiedMethod === 'face' ? 'bi bi-check-circle-fill' : 'bi bi-person-bounding-box'}></i></span>
+          <h3>Face Verification</h3>
+          <p>Look into the camera to verify your identity.</p>
+          <div className={`login-bio-preview ${activeMethod === 'face' && scanState === 'scanning' ? 'is-camera-active' : ''}`}>
+            {activeMethod === 'face' && scanState === 'scanning' ? <video ref={videoRef} className="scanner-video" muted playsInline /> : <i className={verifiedMethod === 'face' ? 'bi bi-check-lg' : 'bi bi-person-fill'}></i>}
+            {activeMethod === 'face' && scanState === 'scanning' && <div className="scanner-laser"></div>}
+          </div>
+          <button className="btn btn-primary-custom w-100" onClick={startFaceScan} disabled={scanState === 'scanning'}>
+            <i className={`bi ${verifiedMethod === 'face' ? 'bi-check-circle' : 'bi-camera-fill'}`}></i>{verifiedMethod === 'face' ? 'Face verified' : activeMethod === 'face' && scanState === 'scanning' ? 'Verifying face...' : 'Start Face Verification'}
+          </button>
+        </section>
+
+        <div className="biometric-or">OR</div>
+
+        <section className={`bio-panel bio-panel--finger login-bio-option ${verifiedMethod === 'fingerprint' ? 'is-verified' : ''}`}>
+          <span className="login-bio-icon login-bio-icon-finger"><i className={verifiedMethod === 'fingerprint' ? 'bi bi-check-circle-fill' : 'bi bi-fingerprint'}></i></span>
+          <h3>Fingerprint Verification</h3>
+          <p>Place your finger on the sensor to verify your identity.</p>
+          <div className="login-bio-preview login-bio-preview-finger"><i className={verifiedMethod === 'fingerprint' ? 'bi bi-check-lg' : 'bi bi-fingerprint'}></i></div>
+          <button className="btn btn-success w-100" onClick={startFingerprintScan} disabled={scanState === 'scanning'}>
+            <i className={`bi ${verifiedMethod === 'fingerprint' ? 'bi-check-circle' : 'bi-fingerprint'}`}></i>{verifiedMethod === 'fingerprint' ? 'Fingerprint verified' : activeMethod === 'fingerprint' && scanState === 'scanning' ? 'Verifying fingerprint...' : 'Start Fingerprint Verification'}
+          </button>
+        </section>
+      </div>
+
+      <div className="biometric-info login-biometric-note"><i className="bi bi-info-circle-fill"></i><span>Choose Face Verification if fingerprint capture is unavailable. Either successful verification method can continue to the ballot.</span></div>
+      {scanState === 'scanning' && <div className="capture-status text-info mt-3" role="status"><i className="bi bi-arrow-repeat me-2"></i>{message}</div>}
+      {scanState === 'success' && <div className="capture-status text-success mt-3" role="status"><i className="bi bi-check-circle-fill me-2"></i>{message}</div>}
+      {scanState === 'error' && <div className="alert alert-danger mt-3 mb-0" role="alert">{message}</div>}
+      {scanState === 'error' && <button onClick={() => { setScanState('idle'); setActiveMethod(null); setMessage(''); }} className="btn btn-outline-light mt-3">Try Again</button>}
+      <button className="btn btn-primary-custom btn-lg w-100 mt-3" disabled={!verifiedMethod || scanState !== 'success'} onClick={() => onSuccess(verifiedName)}>
+        Continue <i className="bi bi-arrow-right ms-2"></i>
+      </button>
     </div>
   );
 };

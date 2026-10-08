@@ -307,13 +307,16 @@ async def verify_face(voter_id: str, file: UploadFile = File(...)) -> dict[str, 
     logger.info("Face comparison completed in %.3fs; total %.3fs", time.perf_counter() - stage_started, time.perf_counter() - request_started)
     verified = score >= MATCH_THRESHOLD
 
-    return {
+    result = {
         "verified": verified,
         "score": round(score, 4),
         "threshold": MATCH_THRESHOLD,
         "verificationStage": "face-match",
         "message": "Face verified successfully." if verified else "Face does not match the stored template.",
     }
+    if verified:
+        result["name"] = load_voter_profiles().get(voter_id.strip(), {}).get("name")
+    return result
 
 
 @app.post("/api/face/enroll/{voter_id}")
