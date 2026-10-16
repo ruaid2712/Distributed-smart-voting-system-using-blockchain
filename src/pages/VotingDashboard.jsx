@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { candidatesData } from '../data/mockData';
 import BiometricScanner from '../components/BiometricScanner';
-import { getContract } from '../lib/ethereum';
-
-const candidateList = candidatesData.map((candidate, id) => ({
-  ...candidate,
-  id,
-  active: true,
-}));
+import { getContract, getReadOnlyContract } from '../lib/ethereum';
 
 const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
   const navigate = useNavigate();
+  const [candidateList, setCandidateList] = useState([]);
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState(true);
+  const [candidateLoadError, setCandidateLoadError] = useState('');
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [isVoting, setIsVoting] = useState(false);
   const [txHash, setTxHash] = useState('');
@@ -22,6 +18,41 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
   useEffect(() => {
     if (!isAuthenticated) navigate('/login');
   }, [isAuthenticated, navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCandidates = async () => {
+      try {
+        const contract = getReadOnlyContract();
+        const candidateCount = Number(await contract.getCandidateCount());
+        const candidateRecords = await Promise.all(
+          Array.from({ length: candidateCount }, (_, index) => contract.getCandidate(index)),
+        );
+        const activeCandidates = candidateRecords
+          .map((candidate, chainId) => ({
+            id: `chain-${chainId}`,
+            chainId,
+            name: candidate[0],
+            party: candidate[1],
+            manifesto: candidate[2],
+            icon: candidate[3],
+            votes: Number(candidate[4]),
+            active: candidate[5],
+          }))
+          .filter((candidate) => candidate.active);
+        if (!cancelled) {
+          setCandidateList(activeCandidates);
+          setCandidateLoadError('');
+        }
+      } catch (error) {
+        if (!cancelled) setCandidateLoadError(error?.message || 'Unable to load candidates from the voting contract.');
+      } finally {
+        if (!cancelled) setIsLoadingCandidates(false);
+      }
+    };
+    loadCandidates();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const initWallet = async () => {
@@ -110,7 +141,10 @@ const VotingDashboard = ({ isAuthenticated, voterId, voterName }) => {
           <div className="ballot-layout">
             <section className="ballot-main">
               <h2 className="ballot-title"><i className="bi bi-people-fill text-info me-2"></i>Candidates / Parties</h2>
-                <p className="ballot-subtitle">Choose one candidate, then verify with face or fingerprint to submit your vote.</p>
+              <p className="ballot-subtitle">Choose one candidate, then verify with face or fingerprint to submit your vote.</p>
+              {candidateLoadError && <div className="alert alert-danger" role="alert">{candidateLoadError}</div>}
+              {isLoadingCandidates && <div className="chart-empty">Loading candidates from the voting contract...</div>}
+              {!isLoadingCandidates && !candidateLoadError && candidateList.length === 0 && <div className="chart-empty">There are no active candidates on the voting contract.</div>}
               <div className="row g-3">
                 {candidateList.map((candidate) => {
                   const isSelected = candidate.chainId !== null && selectedCandidate === candidate.chainId;

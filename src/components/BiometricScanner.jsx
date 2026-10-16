@@ -16,12 +16,38 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
   const [verifiedMethod, setVerifiedMethod] = useState(null);
   const [verifiedName, setVerifiedName] = useState('');
   const [message, setMessage] = useState('');
+  const [biometricStatus, setBiometricStatus] = useState(null);
+  const [biometricStatusError, setBiometricStatusError] = useState('');
   const videoRef = useRef(null);
   const streamRef = useRef(null);
 
   useEffect(() => () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBiometricStatus(null);
+    setBiometricStatusError('');
+    fetch(`${FACE_API_URL}/api/voters/${encodeURIComponent(voterId)}/biometrics`)
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Unable to load enrolled biometric methods.');
+        return result;
+      })
+      .then((result) => {
+        if (!cancelled) setBiometricStatus(result);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setBiometricStatus({ face: false, fingerprint: false });
+          setBiometricStatusError(error.message || 'Unable to load enrolled biometric methods.');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [voterId]);
+
+  const isMethodEnrolled = (method) => biometricStatus?.[method] === true;
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -145,6 +171,8 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
       <div className="biometric-login-heading">
         <h2>Biometric Verification</h2>
         <p>Verify your identity using one method to continue.</p>
+        {biometricStatusError && <p className="text-danger" role="alert">{biometricStatusError}</p>}
+        {!biometricStatusError && biometricStatus && !biometricStatus.face && !biometricStatus.fingerprint && <p className="text-danger" role="alert">No biometric method is enrolled for this voter ID.</p>}
       </div>
 
       <div className="login-biometric-options">
@@ -156,8 +184,8 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
             {activeMethod === 'face' && scanState === 'scanning' ? <video ref={videoRef} className="scanner-video" muted playsInline /> : <i className={verifiedMethod === 'face' ? 'bi bi-check-lg' : 'bi bi-person-fill'}></i>}
             {activeMethod === 'face' && scanState === 'scanning' && <div className="scanner-laser"></div>}
           </div>
-          <button className="btn btn-primary-custom w-100" onClick={startFaceScan} disabled={scanState === 'scanning'}>
-            <i className={`bi ${verifiedMethod === 'face' ? 'bi-check-circle' : 'bi-camera-fill'}`}></i>{verifiedMethod === 'face' ? 'Face verified' : activeMethod === 'face' && scanState === 'scanning' ? 'Verifying face...' : 'Start Face Verification'}
+          <button className="btn btn-primary-custom w-100" onClick={startFaceScan} disabled={scanState === 'scanning' || !isMethodEnrolled('face')}>
+            <i className={`bi ${verifiedMethod === 'face' ? 'bi-check-circle' : 'bi-camera-fill'}`}></i>{verifiedMethod === 'face' ? 'Face verified' : activeMethod === 'face' && scanState === 'scanning' ? 'Verifying face...' : isMethodEnrolled('face') ? 'Start Face Verification' : 'Face not enrolled'}
           </button>
         </section>
 
@@ -168,8 +196,8 @@ const BiometricScanner = ({ voterId, onSuccess }) => {
           <h3>Fingerprint Verification</h3>
           <p>Place your finger on the sensor to verify your identity.</p>
           <div className="login-bio-preview login-bio-preview-finger"><i className={verifiedMethod === 'fingerprint' ? 'bi bi-check-lg' : 'bi bi-fingerprint'}></i></div>
-          <button className="btn btn-success w-100" onClick={startFingerprintScan} disabled={scanState === 'scanning'}>
-            <i className={`bi ${verifiedMethod === 'fingerprint' ? 'bi-check-circle' : 'bi-fingerprint'}`}></i>{verifiedMethod === 'fingerprint' ? 'Fingerprint verified' : activeMethod === 'fingerprint' && scanState === 'scanning' ? 'Verifying fingerprint...' : 'Start Fingerprint Verification'}
+          <button className="btn btn-success w-100" onClick={startFingerprintScan} disabled={scanState === 'scanning' || !isMethodEnrolled('fingerprint')}>
+            <i className={`bi ${verifiedMethod === 'fingerprint' ? 'bi-check-circle' : 'bi-fingerprint'}`}></i>{verifiedMethod === 'fingerprint' ? 'Fingerprint verified' : activeMethod === 'fingerprint' && scanState === 'scanning' ? 'Verifying fingerprint...' : isMethodEnrolled('fingerprint') ? 'Start Fingerprint Verification' : 'Fingerprint not enrolled'}
           </button>
         </section>
       </div>

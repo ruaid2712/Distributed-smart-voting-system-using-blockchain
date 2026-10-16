@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { addCandidate, candidatesData, removeCandidate } from '../data/mockData';
-import { CONTRACT_ADDRESS, EXPECTED_CHAIN_ID, NETWORK_NAME, getReadOnlyContract } from '../lib/ethereum';
+import { CONTRACT_ADDRESS, EXPECTED_CHAIN_ID, NETWORK_NAME, getContract, getReadOnlyContract } from '../lib/ethereum';
 
 const FACE_API_URL = import.meta.env.VITE_FACE_API_URL || 'http://127.0.0.1:8000';
 const electionDetails = [
@@ -13,52 +12,64 @@ const electionDetails = [
 
 const AdminDashboard = ({ isAdmin }) => {
   const navigate = useNavigate();
-  const [candidates, setCandidates] = useState(() => [...candidatesData]);
+  const [candidates, setCandidates] = useState([]);
   const [name, setName] = useState('');
   const [party, setParty] = useState('');
   const [manifesto, setManifesto] = useState('');
   const [icon, setIcon] = useState('bi-award');
   const [liveVoteTotal, setLiveVoteTotal] = useState(null);
-  const [liveCandidateVotes, setLiveCandidateVotes] = useState({});
+  const [liveCandidateResults, setLiveCandidateResults] = useState([]);
   const [voteEvents, setVoteEvents] = useState([]);
   const [registeredVoterCount, setRegisteredVoterCount] = useState(null);
   const [voteLoadError, setVoteLoadError] = useState('');
   const [isCandidateFormOpen, setIsCandidateFormOpen] = useState(false);
+  const [isAddingCandidate, setIsAddingCandidate] = useState(false);
+  const [candidateBeingRemoved, setCandidateBeingRemoved] = useState(null);
+  const [candidateFormError, setCandidateFormError] = useState('');
+  const [candidateActionError, setCandidateActionError] = useState('');
   const [showAllCandidates, setShowAllCandidates] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
 
+  const refreshVoteData = useCallback(async () => {
+    try {
+      const contract = getReadOnlyContract();
+      const candidateCount = Number(await contract.getCandidateCount());
+      const voteCounts = await Promise.all(
+        Array.from({ length: candidateCount }, (_, index) => contract.getCandidate(index)),
+      );
+      const candidateResults = voteCounts.map((candidate, id) => ({
+        id: `chain-${id}`,
+        chainId: id,
+        name: candidate[0],
+        party: candidate[1],
+        manifesto: candidate[2],
+        icon: candidate[3],
+        voteCount: Number(candidate[4]),
+        active: candidate[5],
+      }));
+      const total = voteCounts.reduce((sum, candidate) => sum + Number(candidate[4]), 0);
+      const provider = contract.runner.provider;
+      const latestBlock = await provider.getBlockNumber();
+      const voteLogs = await contract.queryFilter(contract.filters.VoteCast(), 0, latestBlock);
+      const events = voteLogs.map((log) => ({
+        voter: log.args.voter,
+        candidateId: Number(log.args.candidateId),
+        timestamp: Number(log.args.timestamp),
+        transactionHash: log.transactionHash,
+      }));
+      setCandidates(candidateResults);
+      setLiveCandidateResults(candidateResults);
+      setLiveVoteTotal(total);
+      setVoteEvents(events);
+      setVoteLoadError('');
+    } catch (error) {
+      setVoteLoadError(error?.message || 'Unable to load blockchain vote totals.');
+    }
+  }, []);
+
   useEffect(() => {
-    if (!isAdmin) return;
-
-    const loadVoteTotal = async () => {
-      try {
-        const contract = getReadOnlyContract();
-        const candidateCount = Number(await contract.getCandidateCount());
-        const voteCounts = await Promise.all(
-          Array.from({ length: candidateCount }, (_, index) => contract.getCandidate(index)),
-        );
-        const candidateVotes = Object.fromEntries(voteCounts.map((candidate, id) => [id, Number(candidate[4])]));
-        const total = voteCounts.reduce((sum, candidate) => sum + Number(candidate[4]), 0);
-        const provider = contract.runner.provider;
-        const latestBlock = await provider.getBlockNumber();
-        const voteLogs = await contract.queryFilter(contract.filters.VoteCast(), 0, latestBlock);
-        const events = voteLogs.map((log) => ({
-          voter: log.args.voter,
-          candidateId: Number(log.args.candidateId),
-          timestamp: Number(log.args.timestamp),
-          transactionHash: log.transactionHash,
-        }));
-        setLiveCandidateVotes(candidateVotes);
-        setLiveVoteTotal(total);
-        setVoteEvents(events);
-        setVoteLoadError('');
-      } catch (error) {
-        setVoteLoadError(error?.message || 'Unable to load blockchain vote totals.');
-      }
-    };
-
-    loadVoteTotal();
-  }, [isAdmin]);
+    if (isAdmin) refreshVoteData();
+  }, [isAdmin, refreshVoteData]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -76,20 +87,43 @@ const AdminDashboard = ({ isAdmin }) => {
     return <div className="container py-5 text-center"><div className="card card-dark-custom p-5 max-w-md mx-auto"><i className="bi bi-shield-exclamation display-3 text-warning mb-3"></i><h3 className="text-light">Access Denied</h3><p className="text-muted">You must log in through the admin portal to manage the election node.</p><button onClick={() => navigate('/admin-login')} className="btn btn-primary-custom mt-3">Go to Admin Login</button></div></div>;
   }
 
-  const handleAddCandidate = (event) => {
+  const handleAddCandidate = async (event) => {
     event.preventDefault();
     if (!name.trim() || !party.trim() || !manifesto.trim()) return;
-    addCandidate({ name: name.trim(), party: party.trim(), manifesto: manifesto.trim(), icon });
-    setCandidates([...candidatesData]);
-    setName('');
-    setParty('');
-    setManifesto('');
-    setIsCandidateFormOpen(false);
+    setIsAddingCandidate(true);
+    setCandidateFormError('');
+    try {
+      const contract = await getContract();
+      const transaction = await contract.addCandidate(name.trim(), party.trim(), manifesto.trim(), icon);
+      await transaction.wait();
+      await refreshVoteData();
+      setName('');
+      setParty('');
+      setManifesto('');
+      setIsCandidateFormOpen(false);
+    } catch (error) {
+      setCandidateFormError(error?.shortMessage || error?.message || 'Unable to add candidate to the blockchain.');
+    } finally {
+      setIsAddingCandidate(false);
+    }
   };
 
-  const handleDeleteCandidate = (candidateId) => {
-    removeCandidate(candidateId);
-    setCandidates([...candidatesData]);
+  const handleRemoveCandidate = async (candidate) => {
+    const confirmed = window.confirm(`Remove ${candidate.name} from the active ballot? Existing votes will remain in the election record.`);
+    if (!confirmed) return;
+
+    setCandidateBeingRemoved(candidate.chainId);
+    setCandidateActionError('');
+    try {
+      const contract = await getContract();
+      const transaction = await contract.removeCandidate(candidate.chainId);
+      await transaction.wait();
+      await refreshVoteData();
+    } catch (error) {
+      setCandidateActionError(error?.shortMessage || error?.message || 'Unable to remove candidate from the active ballot.');
+    } finally {
+      setCandidateBeingRemoved(null);
+    }
   };
 
   const voterCountsMismatch = registeredVoterCount !== null && liveVoteTotal !== null && liveVoteTotal > registeredVoterCount;
@@ -159,12 +193,35 @@ const AdminDashboard = ({ isAdmin }) => {
             </section>
           </div>
 
+          <section className="admin-panel candidate-results-panel">
+            <header className="admin-panel-header">
+              <h2 className="admin-panel-title"><i className="bi bi-bar-chart-fill"></i>Votes by candidate</h2>
+              <span className="candidate-results-total">{liveVoteTotal === null ? 'Loading totals' : `${liveVoteTotal.toLocaleString()} total votes`}</span>
+            </header>
+            {liveVoteTotal === null ? <div className="chart-empty">{voteLoadError ? 'Vote totals are unavailable.' : 'Loading candidate vote totals...'}</div> : liveCandidateResults.length === 0 ? <div className="chart-empty">No candidates found on-chain.</div> : <div className="candidate-results-list">
+              {liveCandidateResults.map((candidate) => {
+                const sharePercent = liveVoteTotal > 0 ? (candidate.voteCount / liveVoteTotal) * 100 : 0;
+                return <article className="candidate-result" key={candidate.chainId}>
+                  <div className="candidate-result-heading">
+                    <div className="candidate-result-name"><span className="candidate-result-icon"><i className={`bi ${candidate.icon || 'bi-award'}`}></i></span><div><h3>{candidate.name}</h3><p>{candidate.party}</p></div></div>
+                    <div className="candidate-result-count"><strong>{candidate.voteCount.toLocaleString()}</strong><span>votes</span></div>
+                  </div>
+                  <div className="candidate-vote-progress" role="progressbar" aria-label={`${candidate.name} share of votes`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(sharePercent.toFixed(1))}>
+                    <span className="candidate-vote-progress-fill" style={{ width: `${sharePercent}%` }}></span>
+                  </div>
+                  <div className="candidate-result-meta"><span>{sharePercent.toFixed(1)}% of votes</span>{!candidate.active && <span className="table-status table-status-local">Inactive</span>}</div>
+                </article>;
+              })}
+            </div>}
+          </section>
+
           <div className="admin-table-grid">
             <section className="admin-panel admin-table-panel">
               <header className="admin-panel-header"><h2 className="admin-panel-title"><i className="bi bi-people-fill"></i>Registered parties / contestants</h2>{candidates.length > 3 && <button className="table-view-button" onClick={() => setShowAllCandidates((value) => !value)}>{showAllCandidates ? 'Show less' : 'View all'}</button>}</header>
-              <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>ID</th><th>Party / candidate name</th><th>Symbol</th><th>Status</th></tr></thead><tbody>
-                {visibleCandidates.map((candidate) => <tr key={candidate.id}><td>{candidate.id}</td><td>{candidate.party}<small>{candidate.name}</small></td><td><i className={`bi ${candidate.icon} table-symbol`}></i></td><td><span className={`table-status ${candidate.chainId === null ? 'table-status-local' : 'table-status-active'}`}>{candidate.chainId === null ? 'Local' : 'Active'}</span></td></tr>)}
-                {visibleCandidates.length === 0 && <tr><td colSpan="4" className="table-empty">No candidates registered.</td></tr>}
+              {candidateActionError && <div className="alert alert-danger" role="alert">{candidateActionError}</div>}
+              <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>ID</th><th>Party / candidate name</th><th>Symbol</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+                {visibleCandidates.map((candidate) => <tr key={candidate.id}><td>{candidate.id}</td><td>{candidate.party}<small>{candidate.name}</small></td><td><i className={`bi ${candidate.icon} table-symbol`}></i></td><td><span className={`table-status ${candidate.active ? 'table-status-active' : 'table-status-local'}`}>{candidate.active ? 'Active' : 'Inactive'}</span></td><td>{candidate.active && <button type="button" className="candidate-remove-button" title={`Remove ${candidate.name}`} aria-label={`Remove ${candidate.name} from the ballot`} disabled={candidateBeingRemoved === candidate.chainId} onClick={() => handleRemoveCandidate(candidate)}>{candidateBeingRemoved === candidate.chainId ? <span className="spinner-border spinner-border-sm" aria-hidden="true"></span> : <i className="bi bi-trash3" aria-hidden="true"></i>}</button>}</td></tr>)}
+                {visibleCandidates.length === 0 && <tr><td colSpan="5" className="table-empty">No candidates registered.</td></tr>}
               </tbody></table></div>
             </section>
 
@@ -180,14 +237,15 @@ const AdminDashboard = ({ isAdmin }) => {
 
         <aside className="admin-sidebar">
           <section className="admin-action-card admin-action-blue">
-            <div className="admin-action-heading"><span className="admin-action-icon"><i className="bi bi-people-fill"></i></span><div><h2>Register party / contestant</h2><p>Add a local contestant to the demo list.</p></div></div>
+            <div className="admin-action-heading"><span className="admin-action-icon"><i className="bi bi-people-fill"></i></span><div><h2>Register party / contestant</h2><p>Add a contestant to the voting contract.</p></div></div>
             <button className="btn btn-primary-custom w-100" onClick={() => setIsCandidateFormOpen((value) => !value)}><i className={`bi ${isCandidateFormOpen ? 'bi-dash' : 'bi-plus-lg'}`}></i>{isCandidateFormOpen ? 'Close form' : 'Register party / contestant'}</button>
             {isCandidateFormOpen && <form className="admin-candidate-form" onSubmit={handleAddCandidate}>
               <label className="form-label">Candidate name</label><input className="form-control mb-2" value={name} onChange={(event) => setName(event.target.value)} required />
               <label className="form-label">Party</label><input className="form-control mb-2" value={party} onChange={(event) => setParty(event.target.value)} required />
               <label className="form-label">Manifesto</label><textarea className="form-control mb-2" rows="2" value={manifesto} onChange={(event) => setManifesto(event.target.value)} required />
               <label className="form-label">Symbol</label><select className="form-select mb-3" value={icon} onChange={(event) => setIcon(event.target.value)}><option value="bi-award">Award</option><option value="bi-cpu">CPU / Tech</option><option value="bi-shield-check">Shield</option><option value="bi-lightning-charge">Lightning</option><option value="bi-globe">Globe</option></select>
-              <button className="btn btn-primary-custom w-100" type="submit">Add contestant</button>
+              {candidateFormError && <div className="alert alert-danger mb-2" role="alert">{candidateFormError}</div>}
+              <button className="btn btn-primary-custom w-100" type="submit" disabled={isAddingCandidate}>{isAddingCandidate ? 'Waiting for confirmation...' : 'Add contestant on-chain'}</button>
             </form>}
           </section>
 

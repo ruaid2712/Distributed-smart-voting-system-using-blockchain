@@ -12,7 +12,8 @@ const base64ToBlob = (value, type) => {
 
 const Registration = ({ adminToken }) => {
   const [phase, setPhase] = useState('face');
-  const [voterDetails, setVoterDetails] = useState({ name: '', age: '', address: '', ward: '' });
+  const [voterDetails, setVoterDetails] = useState({ name: '', age: '', address: '', ward: '', hasDisability: false });
+  const [biometricMethod, setBiometricMethod] = useState('face');
   const [faceImage, setFaceImage] = useState(null);
   const [voterId, setVoterId] = useState('');
   const [message, setMessage] = useState('');
@@ -30,15 +31,65 @@ const Registration = ({ adminToken }) => {
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  const captureFace = async () => {
+  const updateDisabilityStatus = (hasDisability) => {
+    setVoterDetails({ ...voterDetails, hasDisability });
+    setFaceImage(null);
+    setPhase(hasDisability && biometricMethod === 'fingerprint' ? 'fingerprint' : 'face');
+    setError('');
+  };
+
+  const updateBiometricMethod = (method) => {
+    setBiometricMethod(method);
+    setFaceImage(null);
+    setPhase(method === 'fingerprint' ? 'fingerprint' : 'face');
+    setError('');
+  };
+
+  const validateVoterDetails = () => {
     if (!voterDetails.name.trim() || !voterDetails.age || !voterDetails.address.trim() || !voterDetails.ward.trim()) {
       setError('Complete the voter details before capturing biometrics.');
-      return;
+      return false;
     }
     if (Number(voterDetails.age) < 18 || Number(voterDetails.age) > 120) {
       setError('Voter age must be between 18 and 120.');
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const submitRegistration = async (faceFile, fingerprintFile) => {
+    setPhase('submitting');
+    setMessage('Saving biometric templates and generating voter ID...');
+    const formData = new FormData();
+    formData.append('name', voterDetails.name.trim());
+    formData.append('age', voterDetails.age);
+    formData.append('address', voterDetails.address.trim());
+    formData.append('ward', voterDetails.ward.trim());
+    formData.append('has_disability', String(voterDetails.hasDisability));
+    formData.append('biometric_method', voterDetails.hasDisability ? biometricMethod : 'both');
+    if (faceFile) formData.append('face_file', faceFile, 'face-capture.jpg');
+    if (fingerprintFile) formData.append('fingerprint_file', fingerprintFile, 'fingerprint-capture.bmp');
+
+    try {
+      const registrationResponse = await fetch(`${FACE_API_URL}/api/voters/register`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: formData,
+      });
+      const result = await registrationResponse.json();
+      if (registrationResponse.status === 401) throw new Error('Admin session expired. Log in again.');
+      if (!registrationResponse.ok) throw new Error(result.detail || 'Voter registration failed.');
+      setVoterId(result.voterId);
+      setPhase('complete');
+      setMessage('Registration complete. Give this voter ID to the voter.');
+    } catch (registrationError) {
+      setPhase(voterDetails.hasDisability && biometricMethod === 'fingerprint' ? 'fingerprint' : faceFile && voterDetails.hasDisability ? 'face' : 'fingerprint');
+      setError(registrationError.message || 'Unable to register the voter.');
+    }
+  };
+
+  const captureFace = async () => {
+    if (!validateVoterDetails()) return;
     setError('');
     setMessage('Starting camera...');
     setPhase('face-scanning');
@@ -57,8 +108,12 @@ const Registration = ({ adminToken }) => {
       if (!image) throw new Error('Unable to capture the face image.');
       setFaceImage(image);
       stopCamera();
-      setPhase('fingerprint');
-      setMessage('Face captured. Continue with the fingerprint scan.');
+      if (voterDetails.hasDisability) {
+        await submitRegistration(image, null);
+      } else {
+        setPhase('fingerprint');
+        setMessage('Face captured. Continue with the fingerprint scan.');
+      }
     } catch (captureError) {
       stopCamera();
       setPhase('face');
@@ -67,6 +122,7 @@ const Registration = ({ adminToken }) => {
   };
 
   const captureFingerprintAndRegister = async () => {
+    if (!validateVoterDetails()) return;
     setError('');
     setPhase('fingerprint-scanning');
     setMessage('Place the new voter\'s finger on the SecuGen reader...');
@@ -84,26 +140,8 @@ const Registration = ({ adminToken }) => {
       }
       if (!capture.BMPBase64) throw new Error('SecuGen returned no fingerprint image.');
 
-      setPhase('submitting');
-      setMessage('Saving biometric templates and generating voter ID...');
-      const formData = new FormData();
-      formData.append('name', voterDetails.name.trim());
-      formData.append('age', voterDetails.age);
-      formData.append('address', voterDetails.address.trim());
-      formData.append('ward', voterDetails.ward.trim());
-      formData.append('face_file', faceImage, 'face-capture.jpg');
-      formData.append('fingerprint_file', base64ToBlob(capture.BMPBase64, 'image/bmp'), 'fingerprint-capture.bmp');
-      const registrationResponse = await fetch(`${FACE_API_URL}/api/voters/register`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${adminToken}` },
-        body: formData,
-      });
-      const result = await registrationResponse.json();
-      if (registrationResponse.status === 401) throw new Error('Admin session expired. Log in again.');
-      if (!registrationResponse.ok) throw new Error(result.detail || 'Voter registration failed.');
-      setVoterId(result.voterId);
-      setPhase('complete');
-      setMessage('Registration complete. Give this voter ID to the voter.');
+      const fingerprintImage = base64ToBlob(capture.BMPBase64, 'image/bmp');
+      await submitRegistration(voterDetails.hasDisability ? null : faceImage, fingerprintImage);
     } catch (registrationError) {
       setPhase('fingerprint');
       setError(registrationError.message || 'Unable to register the voter.');
@@ -141,13 +179,27 @@ const Registration = ({ adminToken }) => {
                   <div className="mb-3"><label className="form-label">Age <span>*</span></label><input className="form-control" type="number" min="18" max="120" placeholder="Enter age" value={voterDetails.age} onChange={(event) => setVoterDetails({ ...voterDetails, age: event.target.value })} required /></div>
                   <div className="mb-3 registration-address"><label className="form-label">Address <span>*</span></label><textarea className="form-control" autoComplete="street-address" rows="3" placeholder="Enter complete address" value={voterDetails.address} onChange={(event) => setVoterDetails({ ...voterDetails, address: event.target.value })} required /></div>
                   <div className="mb-3"><label className="form-label">Ward <span>*</span></label><input className="form-control" placeholder="Enter ward" value={voterDetails.ward} onChange={(event) => setVoterDetails({ ...voterDetails, ward: event.target.value })} required /></div>
+                  <fieldset className="mb-3 registration-address">
+                    <legend className="form-label">Is this voter a person with a disability?</legend>
+                    <div className="d-flex flex-wrap gap-3">
+                      <label className="form-check"><input className="form-check-input" type="radio" name="hasDisability" checked={!voterDetails.hasDisability} onChange={() => updateDisabilityStatus(false)} /> <span className="form-check-label">No</span></label>
+                      <label className="form-check"><input className="form-check-input" type="radio" name="hasDisability" checked={voterDetails.hasDisability} onChange={() => updateDisabilityStatus(true)} /> <span className="form-check-label">Yes</span></label>
+                    </div>
+                    {voterDetails.hasDisability && <fieldset className="mt-2">
+                      <legend className="form-label">Choose one biometric method</legend>
+                      <div className="d-flex flex-wrap gap-3">
+                        <label className="form-check"><input className="form-check-input" type="radio" name="biometricMethod" checked={biometricMethod === 'face'} onChange={() => updateBiometricMethod('face')} /> <span className="form-check-label">Face</span></label>
+                        <label className="form-check"><input className="form-check-input" type="radio" name="biometricMethod" checked={biometricMethod === 'fingerprint'} onChange={() => updateBiometricMethod('fingerprint')} /> <span className="form-check-label">Fingerprint</span></label>
+                      </div>
+                    </fieldset>}
+                  </fieldset>
                 </div>
                 <p className="registration-required-note"><i className="bi bi-info-circle-fill"></i> All fields are required. Voter information is stored with the generated voter ID.</p>
               </section>
 
               <section className="registration-biometric-panel">
-                <div className="registration-section-heading"><span className="icon-disc"><i className="bi bi-shield-fill-check"></i></span><div><h2>Biometric registration</h2><p>Capture the voter’s face and fingerprint.</p></div></div>
-                <div className="biometric-info mb-3"><i className="bi bi-check-circle-fill me-2"></i>Capture clear biometric data for accurate verification.</div>
+                <div className="registration-section-heading"><span className="icon-disc"><i className="bi bi-shield-fill-check"></i></span><div><h2>Biometric registration</h2><p>{voterDetails.hasDisability ? `Capture the selected ${biometricMethod} method.` : 'Capture the voter’s face and fingerprint.'}</p></div></div>
+                <div className="biometric-info mb-3"><i className="bi bi-check-circle-fill me-2"></i>{voterDetails.hasDisability ? 'Only the selected biometric will be enrolled for this voter.' : 'Capture clear face and fingerprint data for accurate verification.'}</div>
                 <div className="registration-capture-grid">
                   <article className={`registration-capture-card ${phase.startsWith('face') ? 'is-current' : ''}`}>
                     <h3><span className="capture-icon"><i className="bi bi-camera-fill"></i></span>Face capture</h3>
@@ -156,7 +208,7 @@ const Registration = ({ adminToken }) => {
                       {phase.startsWith('face') ? <video ref={videoRef} className="scanner-video" muted playsInline /> : <i className={`bi ${faceImage ? 'bi-person-bounding-box text-success' : 'bi-person'}`}></i>}
                       {phase === 'face-scanning' && <div className="scanner-laser"></div>}
                     </div>
-                    {phase === 'face' && <button onClick={captureFace} className="btn btn-primary-custom w-100"><i className="bi bi-camera-fill"></i> Capture face</button>}
+                    {phase === 'face' && (!voterDetails.hasDisability || biometricMethod === 'face') && <button onClick={captureFace} className="btn btn-primary-custom w-100"><i className="bi bi-camera-fill"></i> Capture face</button>}
                     {phase === 'face-scanning' && <div className="capture-status text-info">{message}</div>}
                     {faceImage && !phase.startsWith('face') && <div className="capture-status text-success"><i className="bi bi-check-circle-fill me-1"></i>Face captured</div>}
                   </article>
@@ -165,9 +217,9 @@ const Registration = ({ adminToken }) => {
                     <h3><span className="capture-icon capture-icon--green"><i className="bi bi-fingerprint"></i></span>Fingerprint capture</h3>
                     <p>Place the voter’s finger on the sensor.</p>
                     <div className="registration-capture-view registration-fingerprint-view"><i className="bi bi-fingerprint"></i><div className={`scanner-laser ${phase === 'fingerprint-scanning' || phase === 'submitting' ? 'is-visible' : ''}`}></div></div>
-                    {phase === 'fingerprint' && <button onClick={captureFingerprintAndRegister} className="btn btn-success w-100"><i className="bi bi-fingerprint"></i> Capture fingerprint</button>}
+                    {phase === 'fingerprint' && (!voterDetails.hasDisability || biometricMethod === 'fingerprint') && <button onClick={captureFingerprintAndRegister} className="btn btn-success w-100"><i className="bi bi-fingerprint"></i> Capture fingerprint</button>}
                     {(phase === 'fingerprint-scanning' || phase === 'submitting') && <div className="capture-status text-info">{message}</div>}
-                    {phase === 'face' && <div className="capture-status text-muted">Capture the face first.</div>}
+                    {phase === 'face' && (!voterDetails.hasDisability || biometricMethod !== 'fingerprint') && <div className="capture-status text-muted">{voterDetails.hasDisability ? 'Face selected for this voter.' : 'Capture the face first.'}</div>}
                   </article>
                 </div>
                 {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}

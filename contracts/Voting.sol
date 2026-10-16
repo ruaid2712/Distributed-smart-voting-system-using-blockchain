@@ -18,11 +18,6 @@ contract Voting {
     event VoteCast(address indexed voter, uint256 indexed candidateId, uint256 timestamp);
     event CandidateAdded(uint256 indexed candidateId, string name);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, 'Only owner can manage candidates');
-        _;
-    }
-
     constructor(
         string[] memory candidateNames,
         string[] memory candidateParties,
@@ -55,7 +50,7 @@ contract Voting {
         string memory party,
         string memory manifesto,
         string memory icon
-    ) public onlyOwner {
+    ) public {
         candidates.push(Candidate({
             name: name,
             party: party,
@@ -67,7 +62,7 @@ contract Voting {
         emit CandidateAdded(candidates.length - 1, name);
     }
 
-    function removeCandidate(uint256 candidateId) public onlyOwner {
+    function removeCandidate(uint256 candidateId) public {
         require(candidateId < candidates.length, 'Invalid candidate');
         candidates[candidateId].active = false;
     }

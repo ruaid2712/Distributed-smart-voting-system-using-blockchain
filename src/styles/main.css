@@ -358,6 +358,23 @@ a { color: var(--blue); }
 .admin-panel-title { display: flex; align-items: center; gap: 0.48rem; margin: 0; color: var(--ink); font-size: 0.9rem; font-weight: 800; }
 .admin-panel-title > i { color: #3e75bd; }
 .admin-panel-title span { color: #72819a; font-size: 0.75rem; font-weight: 600; }
+.candidate-results-panel { padding: 1rem; }
+.candidate-results-panel .admin-panel-header { margin-bottom: 0.9rem; }
+.candidate-results-total { color: #71819a; font-size: 0.72rem; font-weight: 700; }
+.candidate-results-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem 1.25rem; }
+.candidate-result { min-width: 0; padding: 0.75rem; background: #f8faff; border: 1px solid #e6edf6; border-radius: 6px; }
+.candidate-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.7rem; }
+.candidate-result-name { display: flex; min-width: 0; align-items: center; gap: 0.55rem; }
+.candidate-result-icon { display: grid; flex: 0 0 34px; width: 34px; height: 34px; place-items: center; color: #1768c4; background: #e4f0ff; border-radius: 6px; }
+.candidate-result h3 { margin: 0; overflow: hidden; color: #293a55; font-size: 0.8rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.candidate-result-name p { margin: 0.15rem 0 0; overflow: hidden; color: #7a899e; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.candidate-result-count { display: flex; flex: 0 0 auto; align-items: baseline; gap: 0.28rem; color: #70819b; font-size: 0.66rem; }
+.candidate-result-count strong { color: #293a55; font-size: 0.95rem; font-weight: 800; }
+.candidate-vote-progress { height: 8px; overflow: hidden; background: #e5ebf3; border-radius: 4px; }
+.candidate-vote-progress-fill { display: block; height: 100%; min-width: 0; background: #1672d3; border-radius: inherit; transition: width 350ms ease; }
+.candidate-result:nth-child(3n + 2) .candidate-vote-progress-fill { background: #10a36b; }
+.candidate-result:nth-child(3n) .candidate-vote-progress-fill { background: #e38a37; }
+.candidate-result-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.45rem; color: #687893; font-size: 0.68rem; }
 .turnout-chart-row { display: flex; min-height: 188px; align-items: center; justify-content: center; gap: clamp(1rem, 3vw, 2rem); padding: 0.55rem 0; }
 .turnout-donut { display: grid; flex: 0 0 150px; width: 150px; height: 150px; place-items: center; background: conic-gradient(from -90deg, #0eaa74 var(--turnout), #dce5f1 var(--turnout)); border-radius: 50%; }
 .turnout-donut > div { display: flex; width: 108px; height: 108px; flex-direction: column; align-items: center; justify-content: center; background: #fff; border-radius: 50%; }
@@ -386,6 +403,9 @@ a { color: var(--blue); }
 .admin-table td { max-width: 190px; padding: 0.48rem 0.42rem; overflow: hidden; color: #42536d; border-bottom: 1px solid #edf1f6; text-overflow: ellipsis; }
 .admin-table td small { display: block; overflow: hidden; color: #7a899e; text-overflow: ellipsis; }
 .admin-table tbody tr:last-child td { border-bottom: 0; }
+.candidate-remove-button { display: inline-grid; width: 30px; height: 30px; place-items: center; color: #b33c4e; background: #fff2f4; border: 1px solid #f2d5da; border-radius: 5px; }
+.candidate-remove-button:hover:not(:disabled) { color: #fff; background: #b33c4e; border-color: #b33c4e; }
+.candidate-remove-button:disabled { cursor: wait; opacity: 0.65; }
 .table-symbol { color: #4f78ac; font-size: 0.95rem; }
 .table-status { display: inline-flex; align-items: center; padding: 0.17rem 0.55rem; color: #11875b; background: #e1f7ed; border-radius: 99px; font-size: 0.65rem; font-weight: 750; }
 .table-status-local { color: #83601b; background: #fff3d5; }
@@ -464,7 +484,7 @@ a { color: var(--blue); }
   .admin-metric-icon { flex-basis: 38px; width: 38px; height: 38px; font-size: 1rem; }
   .admin-metric h2 { font-size: 0.68rem; }
   .admin-metric strong { font-size: 1.05rem; }
-  .admin-chart-grid, .admin-table-grid, .admin-sidebar { grid-template-columns: 1fr; }
+  .admin-chart-grid, .admin-table-grid, .admin-sidebar, .candidate-results-list { grid-template-columns: 1fr; }
   .election-info-panel { grid-column: auto; }
   .turnout-chart-row { min-height: 160px; }
   .activity-chart, .chart-empty { min-height: 165px; height: 165px; }

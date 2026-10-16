@@ -254,7 +254,20 @@ def admin_logout(token: str = Depends(require_admin)) -> dict[str, bool]:
 def voter_count() -> dict[str, int]:
     face_voter_ids = {path.stem for path in TEMPLATES_DIR.glob("*.npy")}
     fingerprint_voter_ids = {path.stem for path in FINGERPRINT_TEMPLATES_DIR.glob("*.npz")}
-    return {"count": len(face_voter_ids & fingerprint_voter_ids)}
+    return {"count": len(face_voter_ids | fingerprint_voter_ids)}
+
+
+@app.get("/api/voters/{voter_id}/biometrics")
+def voter_biometrics(voter_id: str) -> dict[str, bool | str | None]:
+    normalized_id = voter_id.strip()
+    face_enrolled = template_path_for(normalized_id).exists()
+    fingerprint_enrolled = fingerprint_template_path_for(normalized_id).exists()
+    profile = load_voter_profiles().get(normalized_id, {})
+    return {
+        "face": face_enrolled,
+        "fingerprint": fingerprint_enrolled,
+        "preferredMethod": profile.get("biometric_method"),
+    }
 
 
 @app.post("/api/face/detect")
@@ -338,8 +351,10 @@ async def register_voter(
     age: int = Form(...),
     address: str = Form(...),
     ward: str = Form(...),
-    face_file: UploadFile = File(...),
-    fingerprint_file: UploadFile = File(...),
+    has_disability: bool = Form(False),
+    biometric_method: str = Form("both"),
+    face_file: UploadFile | None = File(None),
+    fingerprint_file: UploadFile | None = File(None),
     _: str = Depends(require_admin),
 ) -> dict[str, Any]:
     name = name.strip()
@@ -349,27 +364,38 @@ async def register_voter(
         raise HTTPException(status_code=422, detail="Name, address, and ward are required.")
     if age < 18 or age > 120:
         raise HTTPException(status_code=422, detail="Voter age must be between 18 and 120.")
-    if not face_file.content_type or not face_file.content_type.startswith("image/"):
+    if has_disability and biometric_method not in {"face", "fingerprint"}:
+        raise HTTPException(status_code=422, detail="Choose face or fingerprint for a voter with a disability.")
+    if has_disability and biometric_method == "face" and (face_file is None or fingerprint_file is not None):
+        raise HTTPException(status_code=422, detail="Upload only the selected face biometric.")
+    if has_disability and biometric_method == "fingerprint" and (fingerprint_file is None or face_file is not None):
+        raise HTTPException(status_code=422, detail="Upload only the selected fingerprint biometric.")
+    if not has_disability and (face_file is None or fingerprint_file is None):
+        raise HTTPException(status_code=422, detail="Upload both face and fingerprint images.")
+    if face_file and (not face_file.content_type or not face_file.content_type.startswith("image/")):
         raise HTTPException(status_code=415, detail="Upload a face image.")
-    if not fingerprint_file.content_type or not fingerprint_file.content_type.startswith("image/"):
+    if fingerprint_file and (not fingerprint_file.content_type or not fingerprint_file.content_type.startswith("image/")):
         raise HTTPException(status_code=415, detail="Upload a fingerprint image.")
 
     voter_id = generate_voter_id()
-    face_image = decode_image(await face_file.read())
-    fingerprint_image = decode_image(await fingerprint_file.read())
-    face_feature = extract_face_feature(face_image)
-    fingerprint_descriptors = extract_fingerprint_descriptors(fingerprint_image)
-
-    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-    FINGERPRINT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-    np.save(template_path_for(voter_id), face_feature)
-    np.savez_compressed(fingerprint_template_path_for(voter_id), descriptors=fingerprint_descriptors)
+    if face_file:
+        face_image = decode_image(await face_file.read())
+        face_feature = extract_face_feature(face_image)
+        TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+        np.save(template_path_for(voter_id), face_feature)
+    if fingerprint_file:
+        fingerprint_image = decode_image(await fingerprint_file.read())
+        fingerprint_descriptors = extract_fingerprint_descriptors(fingerprint_image)
+        FINGERPRINT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(fingerprint_template_path_for(voter_id), descriptors=fingerprint_descriptors)
     profiles = load_voter_profiles()
     profiles[voter_id] = {
         "name": name,
         "age": age,
         "address": address,
         "ward": ward,
+        "has_disability": has_disability,
+        "biometric_method": biometric_method,
     }
     save_voter_profiles(profiles)
     return {"registered": True, "voterId": voter_id, "name": name}
